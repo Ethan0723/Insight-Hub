@@ -14,6 +14,7 @@ import requests
 import trafilatura
 
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search?q=cross+border+ecommerce"
+REQUEST_HEADERS = {"User-Agent": "Insight-Hub-News-Pipeline/1.0"}
 
 
 def _safe_publish_time(entry: Any) -> str | None:
@@ -86,6 +87,41 @@ def _select_best_content(
     return merged
 
 
+def _extract_source_url(entry: Any) -> str | None:
+    """Read source URL from RSS entry when available."""
+    source = getattr(entry, "source", None)
+    if isinstance(source, dict):
+        return source.get("href") or source.get("url")
+    if hasattr(source, "get"):
+        return source.get("href") or source.get("url")
+    return None
+
+
+def resolve_article_url(rss_link: str, source_url: str | None = None) -> str:
+    """Resolve Google RSS link to the final article URL.
+
+    If resolution fails or still points to news.google.com, fallback to source URL.
+    """
+    if not rss_link:
+        return source_url or ""
+
+    try:
+        response = requests.get(
+            rss_link,
+            timeout=10,
+            allow_redirects=True,
+            verify=certifi.where(),
+            headers=REQUEST_HEADERS,
+        )
+        final_url = str(response.url or "").strip()
+        if final_url and "news.google.com" not in final_url:
+            return final_url
+    except Exception:
+        pass
+
+    return source_url or rss_link
+
+
 def extract_full_content(url: str) -> str | None:
     """Fetch and extract full webpage content from a URL.
 
@@ -99,7 +135,7 @@ def extract_full_content(url: str) -> str | None:
             url,
             timeout=10,
             verify=certifi.where(),
-            headers={"User-Agent": "Insight-Hub-News-Pipeline/1.0"},
+            headers=REQUEST_HEADERS,
         )
         if response.status_code != 200:
             return None
@@ -120,7 +156,7 @@ def _fetch_rss_entries(url: str) -> list[Any]:
             url,
             timeout=15,
             verify=certifi.where(),
-            headers={"User-Agent": "Insight-Hub-News-Pipeline/1.0"},
+            headers=REQUEST_HEADERS,
         )
         if response.status_code != 200:
             print(f"[RSS] Non-200 status for {url}: {response.status_code}")
@@ -160,10 +196,12 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
             title = getattr(entry, "title", "").strip()
             summary = _clean_html(getattr(entry, "summary", "")).strip()
             description = _clean_html(getattr(entry, "description", "")).strip()
-            link = getattr(entry, "link", "")
+            rss_link = getattr(entry, "link", "")
+            source_url = _extract_source_url(entry)
+            article_url = resolve_article_url(rss_link, source_url)
 
             # Try full webpage extraction first, fallback to RSS text candidates.
-            full_content = extract_full_content(link)
+            full_content = extract_full_content(article_url)
             content = _select_best_content(title, full_content, summary, description)
 
             # Skip low-quality records where content is still empty/title-only.
@@ -174,7 +212,7 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
                 {
                     "title": title,
                     "content": content,
-                    "url": link,
+                    "url": rss_link,
                     "publish_time": _safe_publish_time(entry),
                     "source": "Google News",
                 }
