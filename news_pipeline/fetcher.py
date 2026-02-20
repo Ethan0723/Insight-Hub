@@ -5,10 +5,11 @@ Responsible only for fetching and normalizing RSS news items.
 
 from __future__ import annotations
 
-from typing import Any
-import feedparser
 import re
+from typing import Any
 
+import certifi
+import feedparser
 import requests
 import trafilatura
 
@@ -45,7 +46,12 @@ def extract_full_content(url: str) -> str | None:
         return None
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(
+            url,
+            timeout=10,
+            verify=certifi.where(),
+            headers={"User-Agent": "Insight-Hub-News-Pipeline/1.0"},
+        )
         if response.status_code != 200:
             return None
 
@@ -56,6 +62,34 @@ def extract_full_content(url: str) -> str | None:
         return extracted.strip()
     except Exception:
         return None
+
+
+
+def _fetch_rss_entries(url: str) -> list[Any]:
+    """Fetch RSS XML via requests+certifi and parse entries with feedparser."""
+    try:
+        response = requests.get(
+            url,
+            timeout=15,
+            verify=certifi.where(),
+            headers={"User-Agent": "Insight-Hub-News-Pipeline/1.0"},
+        )
+        if response.status_code != 200:
+            print(f"[RSS] Non-200 status for {url}: {response.status_code}")
+            return []
+
+        parsed = feedparser.parse(response.text)
+        entries = getattr(parsed, "entries", []) or []
+
+        # Keep processing when bozo has warnings but entries are available.
+        if getattr(parsed, "bozo", False) and not entries:
+            print(f"[RSS] Parse error for {url}: {getattr(parsed, 'bozo_exception', 'unknown')}")
+            return []
+
+        return entries
+    except Exception as exc:
+        print(f"[RSS] Request failed for {url}: {exc}")
+        return []
 
 
 
@@ -73,13 +107,9 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
     normalized_items: list[dict[str, Any]] = []
 
     for url in urls:
-        parsed = feedparser.parse(url)
+        entries = _fetch_rss_entries(url)
 
-        # Skip invalid/unparseable feeds.
-        if getattr(parsed, "bozo", False):
-            continue
-
-        for entry in getattr(parsed, "entries", []):
+        for entry in entries:
             title = getattr(entry, "title", "").strip()
             summary = _clean_html(getattr(entry, "summary", "")).strip()
             description = _clean_html(getattr(entry, "description", "")).strip()
