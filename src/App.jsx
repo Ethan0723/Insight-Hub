@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import TopNav from './components/TopNav';
 import AIAssistantPanel from './components/AIAssistantPanel';
 import NewsDetailDrawer from './components/ui/NewsDetailDrawer';
@@ -40,6 +40,15 @@ function App() {
   const [evidenceData, setEvidenceData] = useState({ title: '', newsIds: [] });
 
   const [libraryPreset, setLibraryPreset] = useState(null);
+  const [fabPos, setFabPos] = useState({ x: null, y: null });
+  const dragStateRef = useRef({
+    dragging: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    offsetX: 0,
+    offsetY: 0
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -99,6 +108,46 @@ function App() {
       mounted = false;
     };
   }, [selectedNewsId]);
+
+  useEffect(() => {
+    if (fabPos.x !== null && fabPos.y !== null) return;
+    const initialX = Math.max(12, window.innerWidth - 180);
+    const initialY = Math.max(110, Math.round(window.innerHeight * 0.55));
+    setFabPos({ x: initialX, y: initialY });
+  }, [fabPos.x, fabPos.y]);
+
+  useEffect(() => {
+    const onMove = (event) => {
+      if (!dragStateRef.current.dragging) return;
+      if (
+        Math.abs(event.clientX - dragStateRef.current.startX) > 4 ||
+        Math.abs(event.clientY - dragStateRef.current.startY) > 4
+      ) {
+        dragStateRef.current.moved = true;
+      }
+      const x = Math.min(
+        window.innerWidth - 150,
+        Math.max(8, event.clientX - dragStateRef.current.offsetX)
+      );
+      const y = Math.min(
+        window.innerHeight - 46,
+        Math.max(72, event.clientY - dragStateRef.current.offsetY)
+      );
+      setFabPos({ x, y });
+    };
+
+    const onUp = () => {
+      dragStateRef.current.dragging = false;
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, []);
 
   const newsMap = useMemo(() => {
     const map = new Map();
@@ -213,7 +262,27 @@ function App() {
         <button
           type="button"
           onClick={() => setAiPanelOpen(true)}
-          className="fixed bottom-6 right-6 z-30 rounded-full border border-cyan-300/40 bg-slate-900/90 px-4 py-2 text-xs text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.22)] hover:bg-slate-800"
+          onPointerDown={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            dragStateRef.current = {
+              dragging: true,
+              moved: false,
+              startX: event.clientX,
+              startY: event.clientY,
+              offsetX: event.clientX - rect.left,
+              offsetY: event.clientY - rect.top
+            };
+          }}
+          onPointerUp={() => {
+            if (!dragStateRef.current.moved) {
+              setAiPanelOpen(true);
+            }
+          }}
+          style={{
+            left: fabPos.x ?? undefined,
+            top: fabPos.y ?? undefined
+          }}
+          className="fixed z-30 cursor-move rounded-full border border-cyan-300/40 bg-slate-900/90 px-4 py-2 text-xs text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.22)] hover:bg-slate-800"
         >
           🧠 展开 AI 助手
         </button>

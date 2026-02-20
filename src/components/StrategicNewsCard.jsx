@@ -4,9 +4,16 @@ const riskStyles = {
   高: 'text-rose-300 border-rose-300/40 bg-rose-300/10'
 };
 
-function StrategicNewsCard({ news, onDetail, onToggleFavorite, isFavorite, isRead }) {
+function StrategicNewsCard({
+  news,
+  onDetail,
+  onToggleFavorite,
+  isFavorite,
+  isRead,
+  onOpenReference
+}) {
   return (
-    <article className="rounded-2xl border border-slate-700/70 bg-slate-950/65 p-4 transition duration-300 hover:border-cyan-300/40 hover:shadow-[0_0_25px_rgba(34,211,238,0.15)]">
+    <article className="flex h-full flex-col rounded-2xl border border-slate-700/70 bg-slate-950/65 p-4 transition duration-300 hover:border-cyan-300/40 hover:shadow-[0_0_25px_rgba(34,211,238,0.15)]">
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs text-slate-400">{news.source}</span>
         <div className="flex items-center gap-2">
@@ -52,22 +59,34 @@ function StrategicNewsCard({ news, onDetail, onToggleFavorite, isFavorite, isRea
         ))}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => onDetail(news.id)}
-          className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-cyan-400"
-        >
-          查看详情
-        </button>
-        <a
-          href={news.originalUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
-        >
-          查看原文
-        </a>
+      <div className="mt-auto pt-4">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onDetail(news.id)}
+            className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-cyan-400"
+          >
+            查看详情
+          </button>
+          <a
+            href={news.originalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+          >
+            查看原文
+          </a>
+        </div>
+
+        {onOpenReference ? (
+          <button
+            type="button"
+            onClick={onOpenReference}
+            className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
+          >
+            查看被引用关系
+          </button>
+        ) : null}
       </div>
     </article>
   );
