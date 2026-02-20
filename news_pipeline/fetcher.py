@@ -16,7 +16,6 @@ import trafilatura
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search?q=cross+border+ecommerce"
 
 
-
 def _safe_publish_time(entry: Any) -> str | None:
     """Safely read publish time from an RSS entry."""
     publish_time = getattr(entry, "published", None)
@@ -30,11 +29,61 @@ def _safe_publish_time(entry: Any) -> str | None:
     return None
 
 
-
 def _clean_html(text: str) -> str:
     """Remove simple HTML tags from text."""
     return re.sub(r"<.*?>", "", text)
 
+
+def _normalize_text(text: str) -> str:
+    """Normalize whitespace and casing for safer text comparison."""
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _looks_like_title(candidate: str, title: str) -> bool:
+    """Return True when candidate is effectively just the title text."""
+    c = _normalize_text(candidate)
+    t = _normalize_text(title)
+    if not c or not t:
+        return False
+    if c == t:
+        return True
+    if c.startswith(t) and len(c) <= len(t) + 20:
+        return True
+    return False
+
+
+def _is_usable_article_text(candidate: str, title: str) -> bool:
+    """Heuristic to ensure extracted full text is not a title-only stub."""
+    if not candidate:
+        return False
+    if _looks_like_title(candidate, title):
+        return False
+    return len(candidate.strip()) >= 180
+
+
+def _select_best_content(
+    title: str,
+    full_content: str | None,
+    summary: str,
+    description: str,
+) -> str:
+    """Pick best content candidate with strict fallback guards."""
+    if full_content and _is_usable_article_text(full_content, title):
+        return full_content.strip()
+
+    if summary and not _looks_like_title(summary, title):
+        return summary.strip()
+    if description and not _looks_like_title(description, title):
+        return description.strip()
+
+    merged = " ".join(
+        part.strip()
+        for part in [summary, description]
+        if part and not _looks_like_title(part, title)
+    ).strip()
+    return merged
 
 
 def extract_full_content(url: str) -> str | None:
@@ -64,7 +113,6 @@ def extract_full_content(url: str) -> str | None:
         return None
 
 
-
 def _fetch_rss_entries(url: str) -> list[Any]:
     """Fetch RSS XML via requests+certifi and parse entries with feedparser."""
     try:
@@ -92,13 +140,12 @@ def _fetch_rss_entries(url: str) -> list[Any]:
         return []
 
 
-
 def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
     """Fetch and normalize RSS news items.
 
     Returns a list of dict with fields:
     - title
-    - content (full article text when available; fallback to RSS summary)
+    - content (full article text when available; fallback to RSS summary/description)
     - url
     - publish_time
     - source (fixed to "Google News")
@@ -115,14 +162,11 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
             description = _clean_html(getattr(entry, "description", "")).strip()
             link = getattr(entry, "link", "")
 
-            # Try full webpage extraction first.
+            # Try full webpage extraction first, fallback to RSS text candidates.
             full_content = extract_full_content(link)
+            content = _select_best_content(title, full_content, summary, description)
 
-            # Fallback to RSS summary when extraction fails.
-            # If summary is unavailable, use description as last fallback.
-            content = full_content if full_content else (summary or description)
-
-            # Basic sanity filter for empty items.
+            # Skip low-quality records where content is still empty/title-only.
             if not title or not content:
                 continue
 
