@@ -1,64 +1,35 @@
-import { useMemo, useState } from 'react';
-import Navbar from './components/Navbar';
-import StatsCards from './components/StatsCards';
-import DailyIntelSection from './components/DailyIntelSection';
-import ModuleTabs from './components/ModuleTabs';
-import SidebarFilters from './components/SidebarFilters';
-import AIChatPanel from './components/AIChatPanel';
-import { mockIntelData } from './data/mockIntel';
+import TopNav from './components/TopNav';
+import StrategicOverview from './components/StrategicOverview';
+import ReasoningEngine from './components/ReasoningEngine';
+import RevenueImpact from './components/RevenueImpact';
+import IntelligenceFeed from './components/IntelligenceFeed';
+import CompetitionMatrix from './components/CompetitionMatrix';
+import AIAssistantPanel from './components/AIAssistantPanel';
+import ModelExplainPanel from './components/ModelExplainPanel';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('平台');
-  const [chatOpen, setChatOpen] = useState(false);
-
-  const stats = useMemo(
-    () => [
-      {
-        label: '今日情报数量',
-        value: '42',
-        hint: '+12.6% vs 昨日'
-      },
-      {
-        label: '本周新增',
-        value: '186',
-        hint: '覆盖 6 个核心模块'
-      },
-      {
-        label: '覆盖平台数量',
-        value: '27',
-        hint: '平台 + 独立站 + 支付渠道'
-      },
-      {
-        label: 'AI分析次数',
-        value: '1,024',
-        hint: '近 7 日累计'
-      }
-    ],
-    []
-  );
-
-  const dailyIntel = useMemo(() => mockIntelData.slice(0, 6), []);
-
-  const moduleData = useMemo(
-    () => mockIntelData.filter((item) => item.category === activeTab),
-    [activeTab]
-  );
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <Navbar onOpenAI={() => setChatOpen(true)} />
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
 
-      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:px-8 xl:grid-cols-[260px_1fr]">
-        <SidebarFilters />
+      <TopNav />
 
-        <section>
-          <StatsCards stats={stats} />
-          <DailyIntelSection data={dailyIntel} />
-          <ModuleTabs activeTab={activeTab} onChange={setActiveTab} data={moduleData} />
-        </section>
+      <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8 xl:pr-[410px]">
+        <StrategicOverview />
+        <ReasoningEngine />
+        <RevenueImpact />
+        <IntelligenceFeed />
+        <CompetitionMatrix />
+        <ModelExplainPanel />
+
+        <div className="xl:hidden">
+          <AIAssistantPanel />
+        </div>
       </main>
 
-      <AIChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
+      <div className="hidden xl:block">
+        <AIAssistantPanel />
+      </div>
     </div>
   );
 }
