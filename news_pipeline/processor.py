@@ -1,40 +1,91 @@
-"""Orchestration logic for the news pipeline (template)."""
+"""News processing logic: deduplicate and write into news_raw table."""
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
-from .ai_client import summarize_with_claude
-from .fetcher import fetch_rss_items
-from .supabase_client import upsert_news_record
+from .supabase_client import get_news_by_hash, insert_news_raw
 
 
+TARGET_YEAR = 2025
 
-def run_pipeline(
-    feed_urls: list[str],
-    claude_api_url: str,
-    claude_api_key: str,
-    supabase_url: str,
-    supabase_service_role_key: str,
-) -> dict[str, Any]:
-    """Run end-to-end pipeline flow with placeholder behavior.
 
-    Steps:
-    1. Fetch RSS items
-    2. Summarize each item with AI client
-    3. Upsert records to Supabase
-    """
+def generate_content_hash(title: str, url: str, content: str) -> str:
+    """Generate md5 hash based on title + url + content."""
+    base = f"{title.strip()}|{url.strip()}|{content.strip()}"
+    return hashlib.md5(base.encode("utf-8")).hexdigest()
 
-    items = fetch_rss_items(feed_urls)
-    processed_count = 0
+
+def parse_publish_time(raw_time: str | None) -> datetime | None:
+    """Parse RSS publish time safely."""
+    if not raw_time:
+        return None
+
+    try:
+        return parsedate_to_datetime(raw_time)
+    except Exception:
+        return None
+
+
+def is_target_year(dt: datetime | None) -> bool:
+    """Check whether publish time is in or after target year."""
+    if not dt:
+        return False
+    return dt.year >= TARGET_YEAR
+
+
+def process_news_items(items: list[dict[str, Any]]) -> dict[str, int]:
+    inserted_count = 0
+    skipped_count = 0
+    filtered_count = 0
+    error_count = 0
 
     for item in items:
-        summary = summarize_with_claude(item, claude_api_url, claude_api_key)
-        success = upsert_news_record(summary, supabase_url, supabase_service_role_key)
-        if success:
-            processed_count += 1
+        try:
+            title = item.get("title", "")
+            content = item.get("content", "")
+            url = item.get("url", "")
+
+            publish_time_raw = item.get("publish_time")
+            publish_time = parse_publish_time(publish_time_raw)
+
+            # 🔹 只处理 2025 年及以后
+            if not is_target_year(publish_time):
+                filtered_count += 1
+                continue
+
+            content_hash = generate_content_hash(title, url, content)
+
+            existed = get_news_by_hash(content_hash)
+
+            if existed:
+                skipped_count += 1
+                print(f"[SKIP] Existing hash: {content_hash}")
+                continue
+
+            payload = {
+                "title": title,
+                "content": content,
+                "source": item.get("source", "Google News"),
+                "url": url,
+                "publish_time": publish_time,
+                "content_hash": content_hash,
+            }
+
+            insert_news_raw(payload)
+            inserted_count += 1
+            print(f"[NEW] Inserted | hash={content_hash} | title={title}")
+
+        except Exception as exc:
+            error_count += 1
+            print(f"[ERROR] title={item.get('title', '')} | error={exc}")
 
     return {
-        "fetched": len(items),
-        "processed": processed_count,
+        "inserted": inserted_count,
+        "skipped": skipped_count,
+        "filtered": filtered_count,
+        "errors": error_count,
     }
