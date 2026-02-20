@@ -3,7 +3,7 @@ from .fetcher import fetch_rss_items
 from .processor import process_news_items
 from .supabase_client import get_news_without_summary, update_summary
 
-RUN_BACKFILL = True
+RUN_BACKFILL = False
 
 
 def backfill_all_missing_summaries() -> None:
