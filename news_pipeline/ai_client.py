@@ -1,8 +1,10 @@
-"""Claude API client for summary generation."""
+"""Claude API client for structured JSON summary generation."""
 
 from __future__ import annotations
 
+import json
 import os
+from typing import Any
 
 import requests
 from dotenv import load_dotenv
@@ -15,50 +17,175 @@ MODEL = "bedrock-claude-4-5-sonnet"
 
 PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分析师。
 
-请基于以下新闻内容，输出结构化战略分析报告。
+请基于以下新闻内容，输出严格 JSON（不要 Markdown，不要代码块，不要额外解释）。
 
-请严格按照以下结构输出：
+输出 JSON 必须严格包含以下字段，且字段必须存在：
+{
+  "tldr": "一句话战略判断（<=120字）",
+  "impact_score": 0,
+  "risk_level": "低",
+  "platform": "Global",
+  "region": "Global",
+  "dimensions": {
+    "subscription": {"impact": "无", "analysis": ""},
+    "commission": {"impact": "无", "analysis": ""},
+    "payment": {"impact": "无", "analysis": ""},
+    "ecosystem": {"impact": "无", "analysis": ""}
+  },
+  "strategic_actions": [
+    {"priority": "P1", "owner": "战略", "action": ""}
+  ],
+  "tags": ["平台"]
+}
 
-一、新闻核心摘要（Core Summary）
-- 用3-5句话概括新闻核心事实
-- 提炼关键数据、政策变化、市场趋势或公司动态
-- 保持客观，不做评价
+约束：
+1) risk_level 只能是：低/中/高
+2) platform 只能是：Shopify/Shopline/Amazon/TikTok Shop/Global
+3) region 只能是：US/EU/SEA/UK/Global
+4) dimensions 必须包含 subscription/commission/payment/ecosystem 四项
+5) dimensions.*.impact 只能是：高/中/低/无
+6) strategic_actions.priority 只能是：P0/P1/P2
+7) strategic_actions.owner 只能是：产品/战略/商业化
+8) 仅输出合法 JSON
 
-二、行业结构影响（Industry Structure Impact）
-- 该事件对跨境电商行业的短期影响
-- 对行业格局、竞争结构、利润分配逻辑的中长期影响
-- 是否可能改变流量、支付、物流、平台规则或卖家生态
-
-三、平台型SaaS战略启示（Platform SaaS Insight）
-请重点从 Shopify / Shoplazza / 独立站SaaS 视角分析：
-- 对平台流量结构的影响
-- 对商家增长路径的影响
-- 对平台收入结构（订阅费/佣金/支付/广告）的影响
-- 是否存在产品能力升级机会
-- 潜在风险点
-
-四、机会与威胁评估（Opportunities & Risks）
-- 新机会方向（例如新市场、新能力、新产品）
-- 潜在威胁（政策风险、竞争加剧、利润压缩等）
-
-五、影响强度评级（Impact Score）
-- 行业冲击强度（1-5分）
-- 平台战略重要性（1-5分）
-- 简要说明原因
+特别规则：如果正文信息不足，请降低 impact_score，并在 tldr 中简要说明原因（例如“信息不足，判断置信度较低”）。
 
 新闻标题：
 {title}
 
 新闻正文：
 {content}
+"""
 
-请用中文输出，条理清晰，避免空泛表达。
-分析应基于新闻内容展开，而非泛泛行业常识。"""
+_ALLOWED_RISK = {"低", "中", "高"}
+_ALLOWED_PLATFORM = {"Shopify", "Shopline", "Amazon", "TikTok Shop", "Global"}
+_ALLOWED_REGION = {"US", "EU", "SEA", "UK", "Global"}
+_ALLOWED_IMPACT = {"高", "中", "低", "无"}
+_ALLOWED_PRIORITY = {"P0", "P1", "P2"}
+_ALLOWED_OWNER = {"产品", "战略", "商业化"}
 
 
 
-def generate_summary(title: str, content: str) -> str:
-    """Call Claude API and return generated summary text."""
+def _extract_response_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices", [])
+    if not choices:
+        raise ValueError("Claude API returned no choices.")
+
+    message = choices[0].get("message", {})
+    content = message.get("content", "")
+
+    if isinstance(content, list):
+        content = "\n".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+
+    text = str(content).strip()
+    if not text:
+        raise ValueError("Claude API returned empty content.")
+
+    return text
+
+
+
+def _strip_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:]
+    return stripped.strip()
+
+
+
+def _default_payload(reason: str) -> dict[str, Any]:
+    return {
+        "tldr": f"信息不足，判断置信度较低。原因：{reason}",
+        "impact_score": 25,
+        "risk_level": "低",
+        "platform": "Global",
+        "region": "Global",
+        "dimensions": {
+            "subscription": {"impact": "无", "analysis": "信息不足"},
+            "commission": {"impact": "无", "analysis": "信息不足"},
+            "payment": {"impact": "无", "analysis": "信息不足"},
+            "ecosystem": {"impact": "无", "analysis": "信息不足"},
+        },
+        "strategic_actions": [
+            {"priority": "P2", "owner": "战略", "action": "补充更多一手信息后再做策略判断"}
+        ],
+        "tags": ["信息不足"],
+    }
+
+
+
+def _normalize_payload(payload: dict[str, Any], content: str) -> dict[str, Any]:
+    result = _default_payload("模型输出缺失字段")
+
+    result["tldr"] = str(payload.get("tldr") or result["tldr"])[:120]
+
+    score = payload.get("impact_score", result["impact_score"])
+    try:
+        score = int(score)
+    except Exception:
+        score = result["impact_score"]
+    score = max(0, min(100, score))
+
+    if len((content or "").strip()) < 120:
+        score = min(score, 30)
+        if "信息不足" not in result["tldr"]:
+            result["tldr"] = f"{result['tldr']}（信息不足，判断置信度较低）"[:120]
+
+    result["impact_score"] = score
+
+    risk = str(payload.get("risk_level", result["risk_level"]))
+    result["risk_level"] = risk if risk in _ALLOWED_RISK else "中"
+
+    platform = str(payload.get("platform", result["platform"]))
+    result["platform"] = platform if platform in _ALLOWED_PLATFORM else "Global"
+
+    region = str(payload.get("region", result["region"]))
+    result["region"] = region if region in _ALLOWED_REGION else "Global"
+
+    dims = payload.get("dimensions", {}) if isinstance(payload.get("dimensions"), dict) else {}
+    normalized_dims: dict[str, dict[str, str]] = {}
+    for key in ["subscription", "commission", "payment", "ecosystem"]:
+        raw = dims.get(key, {}) if isinstance(dims.get(key), dict) else {}
+        impact = str(raw.get("impact", "无"))
+        if impact not in _ALLOWED_IMPACT:
+            impact = "无"
+        analysis = str(raw.get("analysis", "")) or ""
+        normalized_dims[key] = {"impact": impact, "analysis": analysis}
+    result["dimensions"] = normalized_dims
+
+    actions = payload.get("strategic_actions", [])
+    normalized_actions = []
+    if isinstance(actions, list):
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            priority = str(action.get("priority", "P2"))
+            owner = str(action.get("owner", "战略"))
+            text = str(action.get("action", "")).strip()
+            if priority not in _ALLOWED_PRIORITY:
+                priority = "P2"
+            if owner not in _ALLOWED_OWNER:
+                owner = "战略"
+            if not text:
+                continue
+            normalized_actions.append({"priority": priority, "owner": owner, "action": text})
+
+    if not normalized_actions:
+        normalized_actions = result["strategic_actions"]
+    result["strategic_actions"] = normalized_actions
+
+    tags = payload.get("tags", [])
+    if isinstance(tags, list):
+        result["tags"] = [str(t) for t in tags if str(t).strip()][:12] or result["tags"]
+
+    return result
+
+
+
+def generate_summary(title: str, content: str) -> dict[str, Any]:
+    """Call Claude API and return normalized structured JSON summary."""
 
     if not CLAUDE_API_KEY:
         raise ValueError("Missing CLAUDE_API_KEY in environment.")
@@ -72,28 +199,20 @@ def generate_summary(title: str, content: str) -> str:
     payload = {
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
+        "temperature": 0.1,
     }
 
     response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=60)
     response.raise_for_status()
 
-    data = response.json()
+    text = _extract_response_text(response.json())
+    clean_text = _strip_code_fence(text)
 
-    # Compatible with OpenAI-style response schema used by many LiteLLM gateways.
-    choices = data.get("choices", [])
-    if not choices:
-        raise ValueError("Claude API returned no choices.")
+    try:
+        raw_json = json.loads(clean_text)
+        if not isinstance(raw_json, dict):
+            raise ValueError("Model output is not a JSON object")
+    except Exception:
+        return _default_payload("模型未返回合法 JSON")
 
-    message = choices[0].get("message", {})
-    text = message.get("content", "")
-
-    if isinstance(text, list):
-        # Some models may return structured content blocks.
-        text = "\n".join(str(block.get("text", "")) for block in text if isinstance(block, dict))
-
-    summary = str(text).strip()
-    if not summary:
-        raise ValueError("Claude API returned empty summary.")
-
-    return summary
+    return _normalize_payload(raw_json, content)
