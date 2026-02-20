@@ -1,11 +1,36 @@
 from .ai_client import generate_summary
 from .fetcher import fetch_rss_items
 from .processor import process_news_items
-from .supabase_client import update_summary
+from .supabase_client import get_news_without_summary, update_summary
 
+RUN_BACKFILL = True
+
+
+def backfill_all_missing_summaries() -> None:
+    """Generate and write summaries for all records with null summary."""
+    records = get_news_without_summary()
+    total = len(records)
+    print(f"[BACKFILL] Found {total} records missing summary")
+
+    for index, record in enumerate(records, start=1):
+        news_id = record.get("id", "")
+        title = record.get("title", "")
+        content = record.get("content", "")
+
+        try:
+            summary = generate_summary(title, content)
+            update_summary(news_id, summary)
+            print(f"[BACKFILL] {index}/{total} updated | id={news_id} | title={title}")
+        except Exception as exc:
+            # Continue processing next records even if one fails.
+            print(f"[BACKFILL-ERROR] {index}/{total} id={news_id} | error={exc}")
 
 
 def main():
+    if RUN_BACKFILL:
+        backfill_all_missing_summaries()
+        return
+
     print("Fetching RSS...")
     items = fetch_rss_items()
 

@@ -55,3 +55,14 @@ def update_summary(news_id: str, summary: str) -> None:
     }
 
     _client.table(_TABLE).update(payload).eq("id", news_id).execute()
+
+
+def get_news_without_summary() -> list[dict[str, Any]]:
+    """Return all records where summary is null."""
+    response = (
+        _client.table(_TABLE)
+        .select("id, title, content")
+        .is_("summary", "null")
+        .execute()
+    )
+    return response.data or []
