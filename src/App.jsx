@@ -27,6 +27,7 @@ function App() {
   const [indexesData, setIndexesData] = useState(null);
   const [revenueData, setRevenueData] = useState(null);
   const [selectedNews, setSelectedNews] = useState(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [referenceState, setReferenceState] = useState({ open: false, title: '', ids: [] });
 
   useEffect(() => {
@@ -95,9 +96,14 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
 
-      <TopNav activePage={activePage} onNavigate={handleNavigate} />
+      <TopNav
+        activePage={activePage}
+        onNavigate={handleNavigate}
+        aiPanelOpen={aiPanelOpen}
+        onToggleAI={() => setAiPanelOpen((prev) => !prev)}
+      />
 
-      <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8 xl:pr-[410px]">
+      <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8">
         {activePage === 'library' ? (
           <StrategicNewsLibrary
             news={news}
@@ -133,19 +139,21 @@ function App() {
               />
             </div>
             <ModelExplainPanel explainers={indexesData.modelExplainers} />
-
-            <div className="xl:hidden">
-              <AIAssistantPanel data={indexesData.aiAssistant} />
-            </div>
           </>
         )}
       </main>
 
-      {activePage !== 'library' ? (
-        <div className="hidden xl:block">
-          <AIAssistantPanel data={indexesData.aiAssistant} />
-        </div>
+      {!aiPanelOpen ? (
+        <button
+          type="button"
+          onClick={() => setAiPanelOpen(true)}
+          className="fixed bottom-6 right-6 z-30 rounded-full border border-cyan-300/40 bg-slate-900/90 px-4 py-2 text-xs text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.22)] hover:bg-slate-800"
+        >
+          🧠 展开 AI 助手
+        </button>
       ) : null}
+
+      <AIAssistantPanel data={indexesData.aiAssistant} open={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
 
       <ReferenceModal
         open={referenceState.open}
