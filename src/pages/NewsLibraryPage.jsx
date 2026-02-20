@@ -227,22 +227,21 @@ function NewsLibraryPage({
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {newsPage.list.map((item) => (
-            <div key={item.id} className="space-y-2">
-              <StrategicNewsCard
-                news={item}
-                onDetail={onOpenNews}
-                onToggleFavorite={onToggleFavorite}
-                isFavorite={favorites.includes(item.id)}
-                isRead={readIds.includes(item.id)}
-              />
-              <button
-                type="button"
-                onClick={() => onOpenEvidence({ id: `news-${item.id}`, title: `${item.title} 被引用关系`, newsIds: getNewsReferenceIds(item.id) })}
-                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
-              >
-                查看被引用关系
-              </button>
-            </div>
+            <StrategicNewsCard
+              key={item.id}
+              news={item}
+              onDetail={onOpenNews}
+              onToggleFavorite={onToggleFavorite}
+              isFavorite={favorites.includes(item.id)}
+              isRead={readIds.includes(item.id)}
+              onOpenReference={() =>
+                onOpenEvidence({
+                  id: `news-${item.id}`,
+                  title: `${item.title} 被引用关系`,
+                  newsIds: getNewsReferenceIds(item.id)
+                })
+              }
+            />
           ))}
         </div>
       )}
