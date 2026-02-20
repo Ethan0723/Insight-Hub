@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from typing import Any
 
 from .supabase_client import get_news_by_hash, insert_news_raw
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip().lower()
+
+
+def _is_low_quality_content(title: str, content: str) -> bool:
+    """Block inserts where content is empty or effectively only the title."""
+    t = _normalize_text(title)
+    c = _normalize_text(content)
+    if not c:
+        return True
+    if c == t:
+        return True
+    if c.startswith(t) and len(c) <= len(t) + 20:
+        return True
+    return False
+
 
 def generate_content_hash(content: str) -> str:
     """Generate md5 hash for deduplication."""
     normalized = (content or "").strip()
     return hashlib.md5(normalized.encode("utf-8")).hexdigest()
-
 
 
 def parse_publish_time(publish_time_str: str | None) -> datetime | None:
@@ -28,13 +44,11 @@ def parse_publish_time(publish_time_str: str | None) -> datetime | None:
         return None
 
 
-
 def is_target_year(dt: datetime | None, target_year: int = 2025) -> bool:
     """Only process news from target year and later."""
     if not dt:
         return False
     return dt.year >= target_year
-
 
 
 def process_news_items(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -63,6 +77,11 @@ def process_news_items(items: list[dict[str, Any]]) -> dict[str, Any]:
 
             if not is_target_year(publish_time, 2025):
                 filtered_count += 1
+                continue
+
+            if _is_low_quality_content(title, content):
+                filtered_count += 1
+                print(f"[FILTER] Low-quality content skipped | title={title}")
                 continue
 
             content_hash = generate_content_hash(content)
