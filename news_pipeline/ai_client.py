@@ -190,7 +190,11 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
     if not CLAUDE_API_KEY:
         raise ValueError("Missing CLAUDE_API_KEY in environment.")
 
-    prompt = PROMPT_TEMPLATE.format(title=title or "", content=content or "")
+    # PROMPT_TEMPLATE contains many JSON braces; avoid str.format() to prevent
+    # accidental placeholder parsing for fields like "tldr".
+    prompt = (
+        PROMPT_TEMPLATE.replace("{title}", title or "").replace("{content}", content or "")
+    )
 
     headers = {
         "Authorization": f"Bearer {CLAUDE_API_KEY}",
