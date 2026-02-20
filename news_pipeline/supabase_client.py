@@ -49,17 +49,44 @@ def insert_news_raw(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_summary(news_id: str, summary: dict[str, Any] | str) -> None:
-    """Update summary and summary_generated_at for a news_raw record.
+    """Update summary JSONB and denormalized fields for a news_raw record.
 
-    Summary is persisted as JSON string so front-end can parse it directly.
+    Requirements handled:
+    - Keep full summary in `summary` (JSONB).
+    - Split selected fields into dedicated columns.
+    - Missing fields are written as NULL (None).
+    - Do not crash the pipeline on malformed payload.
     """
-    summary_json = summary if isinstance(summary, str) else json.dumps(summary, ensure_ascii=False)
-    payload = {
-        "summary": summary_json,
-        "summary_generated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    try:
+        summary_obj: dict[str, Any]
 
-    _client.table(_TABLE).update(payload).eq("id", news_id).execute()
+        if isinstance(summary, dict):
+            summary_obj = summary
+        elif isinstance(summary, str):
+            # Attempt to parse string JSON payload.
+            parsed = json.loads(summary)
+            summary_obj = parsed if isinstance(parsed, dict) else {}
+        else:
+            summary_obj = {}
+
+        payload = {
+            # Full summary JSONB
+            "summary": summary_obj if summary_obj else None,
+            "summary_generated_at": datetime.now(timezone.utc).isoformat(),
+            # Denormalized columns (safe .get with NULL fallback)
+            "impact_score": summary_obj.get("impact_score", None),
+            "risk_level": summary_obj.get("risk_level", None),
+            "platform": summary_obj.get("platform", None),
+            "region": summary_obj.get("region", None),
+            "event_type": summary_obj.get("event_type", None),
+            "importance_level": summary_obj.get("importance_level", None),
+            "sentiment_score": summary_obj.get("sentiment_score", None),
+        }
+
+        _client.table(_TABLE).update(payload).eq("id", news_id).execute()
+    except Exception as exc:
+        # Intentionally swallow to avoid breaking the pipeline.
+        print(f"[WARN] update_summary failed | id={news_id} | error={exc}")
 
 
 def get_news_without_summary() -> list[dict[str, Any]]:
