@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,10 +48,14 @@ def insert_news_raw(data: dict[str, Any]) -> dict[str, Any]:
 
 
 
-def update_summary(news_id: str, summary: str) -> None:
-    """Update summary and summary_generated_at for a news_raw record."""
+def update_summary(news_id: str, summary: dict[str, Any] | str) -> None:
+    """Update summary and summary_generated_at for a news_raw record.
+
+    Summary is persisted as JSON string so front-end can parse it directly.
+    """
+    summary_json = summary if isinstance(summary, str) else json.dumps(summary, ensure_ascii=False)
     payload = {
-        "summary": summary,
+        "summary": summary_json,
         "summary_generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
