@@ -1,92 +1,173 @@
 import { useEffect, useMemo, useState } from 'react';
 import TopNav from './components/TopNav';
-import StrategicOverview from './components/StrategicOverview';
-import ReasoningEngine from './components/ReasoningEngine';
-import RevenueImpact from './components/RevenueImpact';
-import IntelligenceFeed from './components/IntelligenceFeed';
-import CompetitionMatrix from './components/CompetitionMatrix';
 import AIAssistantPanel from './components/AIAssistantPanel';
-import ModelExplainPanel from './components/ModelExplainPanel';
-import StrategicNewsLibrary from './components/StrategicNewsLibrary';
 import NewsDetailDrawer from './components/ui/NewsDetailDrawer';
-import ReferenceModal from './components/ui/ReferenceModal';
-import { fetchDashboardData } from './services/mockApi';
+import EvidenceDrawer from './components/ui/EvidenceDrawer';
+import DashboardPage from './pages/DashboardPage';
+import NewsLibraryPage from './pages/NewsLibraryPage';
+import { api } from './services/api';
+import { storage } from './services/storage';
 
-const anchorMap = {
-  reasoning: 'reasoning',
-  revenue: 'revenue',
-  feed: 'feed',
-  matrix: 'matrix',
-  dashboard: 'overview'
+const defaultScenario = {
+  arpuDelta: 0,
+  commissionDelta: 0,
+  paymentSuccessDelta: 0
 };
 
 function App() {
-  const [activePage, setActivePage] = useState('dashboard');
-  const [loading, setLoading] = useState(true);
-  const [news, setNews] = useState([]);
-  const [indexesData, setIndexesData] = useState(null);
-  const [revenueData, setRevenueData] = useState(null);
-  const [selectedNews, setSelectedNews] = useState(null);
+  const [activeNav, setActiveNav] = useState('overview');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [referenceState, setReferenceState] = useState({ open: false, title: '', ids: [] });
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const [newsBase, setNewsBase] = useState([]);
+  const [insight, setInsight] = useState(null);
+  const [matrix, setMatrix] = useState([]);
+  const [meta, setMeta] = useState({ assistant: { samples: [], response: { affectedModules: [], strategy: [] } }, explainers: [] });
+
+  const [scenario, setScenario] = useState(defaultScenario);
+  const [revenueResult, setRevenueResult] = useState(null);
+
+  const [favorites, setFavorites] = useState(storage.getFavorites());
+  const [readIds, setReadIds] = useState(storage.getReadNewsIds());
+
+  const [selectedNewsId, setSelectedNewsId] = useState(null);
+  const [selectedNews, setSelectedNews] = useState(null);
+  const [relatedNews, setRelatedNews] = useState([]);
+
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [evidenceData, setEvidenceData] = useState({ title: '', newsIds: [] });
+
+  const [libraryPreset, setLibraryPreset] = useState(null);
 
   useEffect(() => {
     let mounted = true;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const res = await fetchDashboardData();
-        if (!mounted) return;
-        setNews(res.news);
-        setIndexesData(res.indexes);
-        setRevenueData(res.revenueImpact);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
 
-    load();
+    Promise.all([
+      api.getNews({ page: 1, pageSize: 200 }),
+      api.getDailyInsight(),
+      api.getMatrix(),
+      api.getAppMeta(),
+      api.getRevenueImpact(defaultScenario)
+    ])
+      .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes]) => {
+        if (!mounted) return;
+        setNewsBase(newsRes.list);
+        setInsight(insightRes);
+        setMatrix(matrixRes);
+        setMeta(metaRes);
+        setRevenueResult(revenueRes);
+      })
+      .catch(() => {
+        if (mounted) setError('初始化数据失败，请刷新重试。');
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
     return () => {
       mounted = false;
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    api.getRevenueImpact(scenario).then((res) => {
+      if (mounted) setRevenueResult(res);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [scenario]);
+
+  useEffect(() => {
+    if (!selectedNewsId) return;
+    let mounted = true;
+
+    Promise.all([api.getNewsById(selectedNewsId), api.getRelatedNews(selectedNewsId)]).then(([news, related]) => {
+      if (!mounted) return;
+      setSelectedNews(news);
+      setRelatedNews(related);
+      if (news) {
+        const nextRead = storage.markRead(news.id);
+        setReadIds(nextRead);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedNewsId]);
+
   const newsMap = useMemo(() => {
     const map = new Map();
-    news.forEach((item) => map.set(item.id, item));
+    newsBase.forEach((item) => map.set(item.id, item));
     return map;
-  }, [news]);
+  }, [newsBase]);
 
-  const referenceNewsList = useMemo(() => {
-    const unique = [...new Set(referenceState.ids)];
+  const evidenceNews = useMemo(() => {
+    const unique = [...new Set(evidenceData.newsIds)];
     return unique.map((id) => newsMap.get(id)).filter(Boolean);
-  }, [newsMap, referenceState.ids]);
+  }, [evidenceData.newsIds, newsMap]);
 
-  const openReferences = (title, ids) => {
-    setReferenceState({ open: true, title, ids });
-  };
+  const indexMap = useMemo(() => {
+    const map = {};
+    if (!insight) return map;
+    insight.indexes.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [insight]);
 
-  const getNewsCount = (ids) => ids.filter((id) => newsMap.has(id)).length;
-
-  const handleNavigate = (key) => {
-    if (key === 'library') {
-      setActivePage('library');
-      return;
-    }
-    setActivePage('dashboard');
-    const anchor = anchorMap[key];
-    if (anchor) {
+  const onNavigate = (key) => {
+    setActiveNav(key);
+    if (key !== 'library') {
       setTimeout(() => {
-        document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 20);
+        document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 10);
     }
   };
 
-  if (loading || !indexesData || !revenueData) {
+  const onOpenEvidence = (evidence) => {
+    setEvidenceData({ title: evidence.title, newsIds: evidence.newsIds });
+    setEvidenceOpen(true);
+  };
+
+  const onOpenLibraryByIds = (ids) => {
+    setActiveNav('library');
+    setLibraryPreset({ ids, page: 1 });
+    setEvidenceOpen(false);
+  };
+
+  const onToggleFavorite = (id) => {
+    setFavorites(storage.toggleFavorite(id));
+  };
+
+  const onScenarioChange = (key, value) => {
+    setScenario((prev) => ({ ...prev, [key]: value }));
+  };
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-center px-4 py-40">
-          <p className="animate-pulse text-sm text-cyan-200">AI Strategic Engine 加载中...</p>
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-[1400px] px-4 py-20 lg:px-8">
+          <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-800" />
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div key={idx} className="h-40 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !insight || !revenueResult) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
+          <p className="text-sm text-rose-300">{error || '系统加载异常'}</p>
         </div>
       </div>
     );
@@ -96,50 +177,35 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
 
-      <TopNav
-        activePage={activePage}
-        onNavigate={handleNavigate}
-        aiPanelOpen={aiPanelOpen}
-        onToggleAI={() => setAiPanelOpen((prev) => !prev)}
-      />
+      <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={() => setAiPanelOpen((v) => !v)} />
 
       <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8">
-        {activePage === 'library' ? (
-          <StrategicNewsLibrary
-            news={news}
-            indexes={indexesData.strategicIndexes}
-            onOpenDetail={setSelectedNews}
-            onOpenReferences={openReferences}
+        {activeNav === 'library' ? (
+          <NewsLibraryPage
+            initialQuery={libraryPreset}
+            favorites={favorites}
+            readIds={readIds}
+            onToggleFavorite={onToggleFavorite}
+            onOpenNews={setSelectedNewsId}
+            onOpenEvidence={onOpenEvidence}
+            indexMap={indexMap}
           />
         ) : (
-          <>
-            <div id="overview">
-              <StrategicOverview
-                brief={indexesData.strategicBrief}
-                indexes={indexesData.strategicIndexes}
-                getNewsCount={getNewsCount}
-                onOpenReferences={openReferences}
-              />
-            </div>
-            <div id="reasoning">
-              <ReasoningEngine data={indexesData.reasoningEngine} onOpenReferences={openReferences} />
-            </div>
-            <div id="revenue">
-              <RevenueImpact data={revenueData} onOpenReferences={openReferences} />
-            </div>
-            <div id="feed">
-              <IntelligenceFeed news={news.slice(0, 8)} onOpenDetail={setSelectedNews} />
-            </div>
-            <div id="matrix">
-              <CompetitionMatrix
-                competitors={indexesData.competitors}
-                aiInterpretation={indexesData.aiInterpretation}
-                news={news}
-                onOpenReferences={openReferences}
-              />
-            </div>
-            <ModelExplainPanel explainers={indexesData.modelExplainers} />
-          </>
+          <DashboardPage
+            insight={insight}
+            matrix={matrix}
+            explainers={meta.explainers}
+            revenueResult={revenueResult}
+            revenueScenario={scenario}
+            onRevenueScenarioChange={onScenarioChange}
+            news={newsBase}
+            favorites={favorites}
+            readIds={readIds}
+            onToggleFavorite={onToggleFavorite}
+            onOpenNews={setSelectedNewsId}
+            onOpenEvidence={onOpenEvidence}
+            onOpenLibraryByIds={onOpenLibraryByIds}
+          />
         )}
       </main>
 
@@ -153,17 +219,28 @@ function App() {
         </button>
       ) : null}
 
-      <AIAssistantPanel data={indexesData.aiAssistant} open={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
+      <AIAssistantPanel data={meta.assistant} open={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
 
-      <ReferenceModal
-        open={referenceState.open}
-        title={referenceState.title}
-        newsList={referenceNewsList}
-        onClose={() => setReferenceState({ open: false, title: '', ids: [] })}
-        onSelectNews={setSelectedNews}
+      <EvidenceDrawer
+        open={evidenceOpen}
+        title={evidenceData.title}
+        newsList={evidenceNews}
+        onClose={() => setEvidenceOpen(false)}
+        onOpenNews={setSelectedNewsId}
+        onOpenLibraryByIds={onOpenLibraryByIds}
       />
 
-      <NewsDetailDrawer open={Boolean(selectedNews)} news={selectedNews} onClose={() => setSelectedNews(null)} />
+      <NewsDetailDrawer
+        open={Boolean(selectedNews)}
+        news={selectedNews}
+        relatedNews={relatedNews}
+        onOpenNews={setSelectedNewsId}
+        onClose={() => {
+          setSelectedNewsId(null);
+          setSelectedNews(null);
+          setRelatedNews([]);
+        }}
+      />
     </div>
   );
 }
