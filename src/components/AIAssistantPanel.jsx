@@ -1,12 +1,10 @@
-import { aiAssistantData } from '../data/strategicMockData';
-
-function AIAssistantPanel() {
+function AIAssistantPanel({ data }) {
   return (
     <aside className="rounded-3xl border border-cyan-300/20 bg-slate-900/70 p-5 backdrop-blur-xl xl:fixed xl:right-6 xl:top-24 xl:h-[calc(100vh-7.5rem)] xl:w-[360px] xl:overflow-y-auto">
       <h3 className="text-lg font-semibold text-slate-100">🧠 向 AI 询问战略问题</h3>
 
       <div className="mt-4 space-y-2">
-        {aiAssistantData.samples.map((question) => (
+        {data.samples.map((question) => (
           <button
             key={question}
             type="button"
@@ -23,15 +21,15 @@ function AIAssistantPanel() {
         <div className="mt-3 space-y-2 text-xs text-slate-200">
           <p>
             <span className="text-slate-400">威胁等级：</span>
-            {aiAssistantData.response.threatLevel}
+            {data.response.threatLevel}
           </p>
           <p>
             <span className="text-slate-400">时间窗口：</span>
-            {aiAssistantData.response.timeWindow}
+            {data.response.timeWindow}
           </p>
           <p className="text-slate-400">受影响业务模块：</p>
           <div className="flex flex-wrap gap-2">
-            {aiAssistantData.response.affectedModules.map((item) => (
+            {data.response.affectedModules.map((item) => (
               <span key={item} className="rounded-full border border-slate-600 bg-slate-900 px-2 py-1 text-[11px] text-slate-200">
                 {item}
               </span>
@@ -40,7 +38,7 @@ function AIAssistantPanel() {
 
           <p className="pt-1 text-slate-400">建议战略方向：</p>
           <div className="space-y-2 text-[11px] text-slate-200">
-            {aiAssistantData.response.strategy.map((item) => (
+            {data.response.strategy.map((item) => (
               <p key={item}>{item}</p>
             ))}
           </div>

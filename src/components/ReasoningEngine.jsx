@@ -1,6 +1,4 @@
-import { reasoningEngine } from '../data/strategicMockData';
-
-function ReasoningEngine() {
+function ReasoningEngine({ data, onOpenReferences }) {
   return (
     <section className="rounded-3xl border border-fuchsia-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
@@ -12,16 +10,20 @@ function ReasoningEngine() {
 
       <div className="grid gap-6 xl:grid-cols-[1.35fr_1fr]">
         <div className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4 lg:p-5">
-          <p className="mb-4 text-sm text-slate-400">情报转战略路径</p>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            {reasoningEngine.chain.map((node, index) => (
-              <div key={node} className="flex items-center gap-3">
-                <div className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200">
-                  {node}
-                </div>
-                {index < reasoningEngine.chain.length - 1 ? (
-                  <span className="text-cyan-300">→</span>
-                ) : null}
+          <p className="mb-4 text-sm text-slate-400">情报转战略路径（点击节点查看来源）</p>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:flex-wrap">
+            {data.chain.map((node, index) => (
+              <div key={node.id} className="flex items-center gap-3">
+                <button
+                  type="button"
+                  title={`引用新闻 ${node.citedNewsIds.length} 条`}
+                  onClick={() => onOpenReferences(node.text, node.citedNewsIds)}
+                  className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:text-cyan-200"
+                >
+                  {node.text}
+                  <span className="ml-2 text-xs text-slate-400">({node.citedNewsIds.length})</span>
+                </button>
+                {index < data.chain.length - 1 ? <span className="text-cyan-300">→</span> : null}
               </div>
             ))}
           </div>
@@ -30,14 +32,14 @@ function ReasoningEngine() {
         <div className="space-y-4">
           <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
             <p className="text-xs text-slate-400">影响评分</p>
-            <p className="mt-2 text-4xl font-semibold text-cyan-200">{reasoningEngine.impactScore}</p>
+            <p className="mt-2 text-4xl font-semibold text-cyan-200">{data.impactScore}</p>
             <p className="mt-2 text-xs text-slate-500">0-100 越高表示对收入模型扰动越大</p>
           </article>
 
           <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
             <p className="mb-3 text-xs text-slate-400">影响维度</p>
             <div className="space-y-2">
-              {reasoningEngine.dimensions.map((item) => (
+              {data.dimensions.map((item) => (
                 <div key={item.name}>
                   <div className="mb-1 flex justify-between text-xs text-slate-300">
                     <span>{item.name}</span>
@@ -59,7 +61,7 @@ function ReasoningEngine() {
       <article className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
         <p className="mb-2 text-sm text-amber-200">建议优先级</p>
         <div className="space-y-2 text-sm text-slate-200">
-          {reasoningEngine.priority.map((item) => (
+          {data.priority.map((item) => (
             <p key={item}>{item}</p>
           ))}
         </div>
