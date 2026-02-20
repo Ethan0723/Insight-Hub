@@ -9,6 +9,9 @@ from typing import Any
 import feedparser
 import re
 
+import requests
+import trafilatura
+
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search?q=cross+border+ecommerce"
 
 
@@ -28,8 +31,31 @@ def _safe_publish_time(entry: Any) -> str | None:
 
 
 def _clean_html(text: str) -> str:
-    """Remove simple HTML tags from RSS content."""
+    """Remove simple HTML tags from text."""
     return re.sub(r"<.*?>", "", text)
+
+
+
+def extract_full_content(url: str) -> str | None:
+    """Fetch and extract full webpage content from a URL.
+
+    Returns extracted plain text, or None on failure.
+    """
+    if not url:
+        return None
+
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return None
+
+        extracted = trafilatura.extract(response.text)
+        if not extracted:
+            return None
+
+        return extracted.strip()
+    except Exception:
+        return None
 
 
 
@@ -38,7 +64,7 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
 
     Returns a list of dict with fields:
     - title
-    - content (summary first, fallback to description)
+    - content (full article text when available; fallback to RSS summary)
     - url
     - publish_time
     - source (fixed to "Google News")
@@ -55,11 +81,16 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
 
         for entry in getattr(parsed, "entries", []):
             title = getattr(entry, "title", "").strip()
-            summary = getattr(entry, "summary", "")
-            description = getattr(entry, "description", "")
-            content_raw = summary or description or ""
-            content = _clean_html(content_raw).strip()
+            summary = _clean_html(getattr(entry, "summary", "")).strip()
+            description = _clean_html(getattr(entry, "description", "")).strip()
             link = getattr(entry, "link", "")
+
+            # Try full webpage extraction first.
+            full_content = extract_full_content(link)
+
+            # Fallback to RSS summary when extraction fails.
+            # If summary is unavailable, use description as last fallback.
+            content = full_content if full_content else (summary or description)
 
             # Basic sanity filter for empty items.
             if not title or not content:
