@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { strategicBrief, strategicIndexes } from '../data/strategicMockData';
+import { useEffect, useState } from 'react';
 
 function AnimatedValue({ value }) {
   const [display, setDisplay] = useState(0);
 
   useEffect(() => {
     let raf = 0;
-    const duration = 1000;
+    const duration = 900;
     const start = performance.now();
 
     const tick = (now) => {
@@ -22,20 +21,20 @@ function AnimatedValue({ value }) {
   return <span>{display}</span>;
 }
 
-function StrategicOverview() {
+function StrategicOverview({ brief, indexes, getNewsCount, onOpenReferences }) {
   const [typed, setTyped] = useState('');
-  const fullText = useMemo(() => strategicBrief, []);
 
   useEffect(() => {
+    if (!brief) return;
     let i = 0;
     const timer = setInterval(() => {
       i += 1;
-      setTyped(fullText.slice(0, i));
-      if (i >= fullText.length) clearInterval(timer);
-    }, 18);
+      setTyped(brief.slice(0, i));
+      if (i >= brief.length) clearInterval(timer);
+    }, 14);
 
     return () => clearInterval(timer);
-  }, [fullText]);
+  }, [brief]);
 
   return (
     <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-8">
@@ -55,7 +54,7 @@ function StrategicOverview() {
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {strategicIndexes.map((index) => (
+        {indexes.map((index) => (
           <article
             key={index.id}
             className="rounded-2xl border border-blue-300/20 bg-slate-900/70 p-4 transition duration-300 hover:border-cyan-300/40 hover:shadow-[0_0_30px_rgba(56,189,248,0.15)]"
@@ -68,6 +67,14 @@ function StrategicOverview() {
               <p className="pb-1 text-xs text-emerald-300">{index.delta}</p>
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-400">{index.description}</p>
+            <p className="mt-3 text-xs text-slate-400">引用新闻数量: {getNewsCount(index.citedNewsIds)}</p>
+            <button
+              type="button"
+              onClick={() => onOpenReferences(index.name, index.citedNewsIds)}
+              className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+            >
+              查看引用来源
+            </button>
           </article>
         ))}
       </div>

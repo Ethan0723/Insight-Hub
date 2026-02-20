@@ -1,6 +1,13 @@
-const menus = ['战略总览', '推理引擎', '收入影响', '情报输入层', '竞争矩阵'];
+const menus = [
+  { key: 'dashboard', label: '战略总览' },
+  { key: 'reasoning', label: '推理引擎' },
+  { key: 'revenue', label: '收入影响' },
+  { key: 'feed', label: '情报输入层' },
+  { key: 'matrix', label: '竞争矩阵' },
+  { key: 'library', label: '新闻库' }
+];
 
-function TopNav() {
+function TopNav({ activePage, onNavigate }) {
   return (
     <header className="sticky top-0 z-30 border-b border-blue-400/10 bg-slate-950/75 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1400px] items-center justify-between px-4 py-4 lg:px-8">
@@ -14,16 +21,26 @@ function TopNav() {
           </div>
         </div>
 
-        <nav className="hidden items-center gap-5 xl:flex">
-          {menus.map((item) => (
-            <a
-              key={item}
-              href="#"
-              className="text-sm text-slate-300 transition hover:text-cyan-300"
-            >
-              {item}
-            </a>
-          ))}
+        <nav className="hidden items-center gap-2 xl:flex">
+          {menus.map((item) => {
+            const active = activePage === 'library' ? item.key === 'library' : item.key !== 'library';
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onNavigate(item.key)}
+                className={`rounded-lg px-3 py-2 text-sm transition ${
+                  active && item.key === 'library'
+                    ? 'bg-cyan-400/20 text-cyan-200'
+                    : active
+                      ? 'bg-slate-800 text-slate-100'
+                      : 'text-slate-300 hover:text-cyan-300'
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
