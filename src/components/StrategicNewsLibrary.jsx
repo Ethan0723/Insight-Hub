@@ -13,10 +13,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
   const [sortBy, setSortBy] = useState('date');
 
   const platforms = useMemo(() => [...new Set(news.map((item) => item.platform))], [news]);
-  const dimensions = useMemo(
-    () => [...new Set(news.flatMap((item) => item.impact_dimension))],
-    [news]
-  );
+  const dimensions = useMemo(() => [...new Set(news.flatMap((item) => item.impact_dimension))], [news]);
 
   const toggleValue = (value, list, setList) => {
     setList(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
@@ -27,8 +24,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
       const byPlatform = selectedPlatforms.length === 0 || selectedPlatforms.includes(item.platform);
       const byRisk = selectedRisks.length === 0 || selectedRisks.includes(item.risk_level);
       const byDimension =
-        selectedDimensions.length === 0 ||
-        selectedDimensions.some((dim) => item.impact_dimension.includes(dim));
+        selectedDimensions.length === 0 || selectedDimensions.some((dim) => item.impact_dimension.includes(dim));
       const byKeyword = item.title.toLowerCase().includes(search.toLowerCase());
       const byFrom = !dateFrom || new Date(item.publish_date) >= new Date(dateFrom);
       const byTo = !dateTo || new Date(item.publish_date) <= new Date(dateTo);
@@ -59,17 +55,14 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
   }, [filteredNews]);
 
   const getReferenceNewsIds = (item) => {
-    const ids = indexes
-      .filter((index) => index.citedNewsIds.includes(item.id))
-      .map((index) => index.id);
-
+    const ids = indexes.filter((index) => index.citedNewsIds.includes(item.id)).map((index) => index.id);
     return ids;
   };
 
   return (
     <section className="space-y-5">
       <div className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5 flex items-center justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-slate-100">Strategic News Library</h2>
             <p className="mt-1 text-sm text-slate-400">可追溯的战略输入新闻库与引用关系检索</p>
@@ -112,8 +105,8 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
       </div>
 
       <div className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl">
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
-          <div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
+          <div className="xl:col-span-3">
             <p className="mb-2 text-xs text-slate-400">平台筛选（多选）</p>
             <div className="flex flex-wrap gap-2">
               {platforms.map((item) => (
@@ -133,7 +126,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
             </div>
           </div>
 
-          <div>
+          <div className="xl:col-span-2">
             <p className="mb-2 text-xs text-slate-400">风险等级筛选</p>
             <div className="flex flex-wrap gap-2">
               {['低', '中', '高'].map((item) => (
@@ -153,7 +146,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
             </div>
           </div>
 
-          <div>
+          <div className="xl:col-span-3">
             <p className="mb-2 text-xs text-slate-400">影响维度筛选</p>
             <div className="flex flex-wrap gap-2">
               {dimensions.map((item) => (
@@ -173,7 +166,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
             </div>
           </div>
 
-          <div>
+          <div className="xl:col-span-2">
             <p className="mb-2 text-xs text-slate-400">时间区间筛选</p>
             <div className="grid gap-2">
               <input
@@ -191,7 +184,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
             </div>
           </div>
 
-          <div>
+          <div className="xl:col-span-2">
             <p className="mb-2 text-xs text-slate-400">搜索标题关键词</p>
             <input
               value={search}
@@ -203,7 +196,7 @@ function StrategicNewsLibrary({ news, indexes, onOpenDetail, onOpenReferences })
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filteredNews.map((item) => (
           <div key={item.id} className="space-y-2">
             <StrategicNewsCard news={item} onDetail={onOpenDetail} />

@@ -7,7 +7,7 @@ const menus = [
   { key: 'library', label: '新闻库' }
 ];
 
-function TopNav({ activePage, onNavigate }) {
+function TopNav({ activePage, onNavigate, aiPanelOpen, onToggleAI }) {
   return (
     <header className="sticky top-0 z-30 border-b border-blue-400/10 bg-slate-950/75 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1400px] items-center justify-between px-4 py-4 lg:px-8">
@@ -43,8 +43,22 @@ function TopNav({ activePage, onNavigate }) {
           })}
         </nav>
 
-        <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
-          系统状态: 在线
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleAI}
+            className={`rounded-full border px-3 py-1 text-xs transition ${
+              aiPanelOpen
+                ? 'border-cyan-300/40 bg-cyan-300/15 text-cyan-200'
+                : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200'
+            }`}
+          >
+            {aiPanelOpen ? '收起 AI 助手' : '展开 AI 助手'}
+          </button>
+
+          <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
+            系统状态: 在线
+          </div>
         </div>
       </div>
     </header>
