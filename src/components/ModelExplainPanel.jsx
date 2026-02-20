@@ -2,9 +2,7 @@ function ModelExplainPanel({ explainers }) {
   return (
     <section className="rounded-3xl border border-emerald-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <details>
-        <summary className="cursor-pointer list-none text-xl font-semibold text-slate-100 lg:text-2xl">
-          ⚙ AI 战略模型说明
-        </summary>
+        <summary className="cursor-pointer list-none text-xl font-semibold text-slate-100 lg:text-2xl">⚙ AI 战略模型说明</summary>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {explainers.map((item) => (
             <article key={item.title} className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">

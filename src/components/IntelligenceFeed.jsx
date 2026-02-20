@@ -1,6 +1,6 @@
 import StrategicNewsCard from './StrategicNewsCard';
 
-function IntelligenceFeed({ news, onOpenDetail }) {
+function IntelligenceFeed({ news, favorites, readIds, onToggleFavorite, onOpenDetail }) {
   return (
     <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
@@ -12,7 +12,14 @@ function IntelligenceFeed({ news, onOpenDetail }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {news.map((item) => (
-          <StrategicNewsCard key={item.id} news={item} onDetail={onOpenDetail} />
+          <StrategicNewsCard
+            key={item.id}
+            news={item}
+            onDetail={onOpenDetail}
+            onToggleFavorite={onToggleFavorite}
+            isFavorite={favorites.includes(item.id)}
+            isRead={readIds.includes(item.id)}
+          />
         ))}
       </div>
     </section>

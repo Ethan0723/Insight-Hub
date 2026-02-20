@@ -1,29 +1,52 @@
-function ReasoningEngine({ data, onOpenReferences }) {
+function Sparkline({ points }) {
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const range = max - min || 1;
+  const d = points
+    .map((value, idx) => {
+      const x = (idx / (points.length - 1)) * 100;
+      const y = 100 - ((value - min) / range) * 100;
+      return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
+    })
+    .join(' ');
+
+  return (
+    <svg viewBox="0 0 100 100" className="h-9 w-20">
+      <path d={d} fill="none" stroke="rgb(34,211,238)" strokeWidth="4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ReasoningEngine({ insight, onOpenEvidence }) {
   return (
     <section className="rounded-3xl border border-fuchsia-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">战略影响推理引擎</h2>
         <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-3 py-1 text-xs text-fuchsia-200">
-          AI 因果链推理
+          最近更新: {insight.updatedAt}
         </span>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.35fr_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
         <div className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4 lg:p-5">
-          <p className="mb-4 text-sm text-slate-400">情报转战略路径（点击节点查看来源）</p>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:flex-wrap">
-            {data.chain.map((node, index) => (
+          <p className="mb-4 text-sm text-slate-400">可点击因果链（查看节点证据）</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {insight.reasoningNodes.map((node, index) => (
               <div key={node.id} className="flex items-center gap-3">
                 <button
                   type="button"
-                  title={`引用新闻 ${node.citedNewsIds.length} 条`}
-                  onClick={() => onOpenReferences(node.text, node.citedNewsIds)}
-                  className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:text-cyan-200"
+                  title={`引用新闻 ${node.evidence.newsIds.length} 条`}
+                  onClick={() => onOpenEvidence(node.evidence)}
+                  className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-300/40"
                 >
-                  {node.text}
-                  <span className="ml-2 text-xs text-slate-400">({node.citedNewsIds.length})</span>
+                  <p>{node.text}</p>
+                  <p className="mt-1 text-[10px] text-slate-400">{node.explain}</p>
                 </button>
-                {index < data.chain.length - 1 ? <span className="text-cyan-300">→</span> : null}
+                <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-1">
+                  <Sparkline points={node.trend7d} />
+                </div>
+                <span className="text-xs text-slate-400">{node.evidence.newsIds.length} 条</span>
+                {index < insight.reasoningNodes.length - 1 ? <span className="text-cyan-300">→</span> : null}
               </div>
             ))}
           </div>
@@ -32,24 +55,23 @@ function ReasoningEngine({ data, onOpenReferences }) {
         <div className="space-y-4">
           <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
             <p className="text-xs text-slate-400">影响评分</p>
-            <p className="mt-2 text-4xl font-semibold text-cyan-200">{data.impactScore}</p>
+            <p className="mt-2 text-4xl font-semibold text-cyan-200">{insight.impactScore}</p>
             <p className="mt-2 text-xs text-slate-500">0-100 越高表示对收入模型扰动越大</p>
           </article>
 
           <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
             <p className="mb-3 text-xs text-slate-400">影响维度</p>
             <div className="space-y-2">
-              {data.dimensions.map((item) => (
+              {insight.dimensions.map((item) => (
                 <div key={item.name}>
                   <div className="mb-1 flex justify-between text-xs text-slate-300">
                     <span>{item.name}</span>
-                    <span>{item.score}</span>
+                    <button type="button" onClick={() => onOpenEvidence(item.evidence)} className="text-cyan-200 hover:underline">
+                      {item.score} · 证据
+                    </button>
                   </div>
                   <div className="h-2 rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
-                      style={{ width: `${item.score}%` }}
-                    />
+                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${item.score}%` }} />
                   </div>
                 </div>
               ))}
@@ -61,7 +83,7 @@ function ReasoningEngine({ data, onOpenReferences }) {
       <article className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
         <p className="mb-2 text-sm text-amber-200">建议优先级</p>
         <div className="space-y-2 text-sm text-slate-200">
-          {data.priority.map((item) => (
+          {insight.priorities.map((item) => (
             <p key={item}>{item}</p>
           ))}
         </div>
