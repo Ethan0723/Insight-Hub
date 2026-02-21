@@ -6,6 +6,8 @@ Responsible only for fetching and normalizing RSS news items.
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import certifi
@@ -13,9 +15,16 @@ import feedparser
 import requests
 import trafilatura
 
-from .config import get_default_rss_feeds
+from .config import get_default_rss_feeds, load_config
 
-REQUEST_HEADERS = {"User-Agent": "Insight-Hub-News-Pipeline/1.0"}
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/121.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+}
 
 
 def _safe_publish_time(entry: Any) -> str | None:
@@ -29,6 +38,16 @@ def _safe_publish_time(entry: Any) -> str | None:
         return str(updated_time)
 
     return None
+
+
+def _parse_publish_time(raw: str | None) -> datetime | None:
+    """Parse RSS publish time into datetime."""
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw)
+    except Exception:
+        return None
 
 
 def _clean_html(text: str) -> str:
@@ -64,6 +83,9 @@ def _is_usable_article_text(candidate: str, title: str) -> bool:
     if not candidate:
         return False
     if _looks_like_title(candidate, title):
+        return False
+    # Reject heavily truncated snippets.
+    if candidate.count("...") + candidate.count("…") >= 3:
         return False
     return len(candidate.strip()) >= 180
 
@@ -131,10 +153,7 @@ def resolve_article_url(rss_link: str, source_url: str | None = None) -> str:
 
 
 def extract_full_content(url: str) -> str | None:
-    """Fetch and extract full webpage content from a URL.
-
-    Returns extracted plain text, or None on failure.
-    """
+    """Fetch and extract full webpage content from a URL."""
     if not url:
         return None
 
@@ -158,41 +177,44 @@ def extract_full_content(url: str) -> str | None:
 
 
 def _fetch_rss_entries(url: str) -> list[Any]:
-    """Fetch RSS XML via requests+certifi and parse entries with feedparser."""
+    """Fetch RSS XML and parse entries with resilient fallbacks."""
     try:
         response = requests.get(
             url,
             timeout=15,
             verify=certifi.where(),
             headers=REQUEST_HEADERS,
+            allow_redirects=True,
         )
         if response.status_code != 200:
             print(f"[RSS] Non-200 status for {url}: {response.status_code}")
             return []
 
-        parsed = feedparser.parse(response.text)
-        entries = getattr(parsed, "entries", []) or []
+        # Try bytes first (better encoding handling), then text, then URL direct parse.
+        for parser_input in (response.content, response.text, url):
+            parsed = feedparser.parse(parser_input)
+            entries = getattr(parsed, "entries", []) or []
+            if entries:
+                return entries
 
-        if getattr(parsed, "bozo", False) and not entries:
-            print(f"[RSS] Parse error for {url}: {getattr(parsed, 'bozo_exception', 'unknown')}")
-            return []
-
-        return entries
+        print(f"[RSS] Parse error for {url}: no entries parsed")
+        return []
     except Exception as exc:
         print(f"[RSS] Request failed for {url}: {exc}")
         return []
 
 
-def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
+def fetch_rss_items(
+    feed_urls: list[str] | None = None,
+    min_publish_time: datetime | None = None,
+) -> list[dict[str, Any]]:
     """Fetch and normalize RSS news items from all configured feeds.
 
-    Returns list items with:
-    - title
-    - content
-    - url (original rss link)
-    - publish_time
-    - source (feed source name)
+    - Supports incremental fetch via min_publish_time.
+    - Applies per-feed cap to keep runtime manageable.
     """
+    cfg = load_config()
+
     if feed_urls:
         feeds = [{"name": "Custom Feed", "url": url} for url in feed_urls]
     else:
@@ -204,9 +226,16 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
         feed_name = feed.get("name", "Unknown")
         feed_url = feed.get("url", "")
         entries = _fetch_rss_entries(feed_url)
+        if cfg.max_entries_per_feed > 0:
+            entries = entries[: cfg.max_entries_per_feed]
         print(f"[RSS] {feed_name}: {len(entries)} entries")
 
         for entry in entries:
+            raw_publish_time = _safe_publish_time(entry)
+            publish_dt = _parse_publish_time(raw_publish_time)
+            if min_publish_time and publish_dt and publish_dt < min_publish_time:
+                continue
+
             title = _clean_html(getattr(entry, "title", ""))
             summary = _clean_html(getattr(entry, "summary", ""))
             description = _clean_html(getattr(entry, "description", ""))
@@ -225,7 +254,7 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
                     "title": title,
                     "content": content,
                     "url": rss_link,
-                    "publish_time": _safe_publish_time(entry),
+                    "publish_time": raw_publish_time,
                     "source": feed_name,
                 }
             )
