@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from difflib import SequenceMatcher
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -74,7 +75,20 @@ IMPACT_KEYWORDS = {
 
 
 def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "")).strip().lower()
+    normalized = re.sub(r"\s+", " ", (text or "")).strip().lower()
+    # Remove common noisy separators/suffix patterns.
+    normalized = re.sub(r"\s+\|\s+.*$", "", normalized)
+    normalized = re.sub(r"\s+-\s+.*$", "", normalized)
+    normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff\s]", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _title_similarity(title: str, content: str) -> float:
+    t = _normalize_text(title)
+    c = _normalize_text(content)
+    if not t or not c:
+        return 0.0
+    return SequenceMatcher(None, t, c).ratio()
 
 
 def _is_low_quality_content(title: str, content: str) -> bool:
@@ -86,6 +100,15 @@ def _is_low_quality_content(title: str, content: str) -> bool:
     if c == t:
         return True
     if c.startswith(t) and len(c) <= len(t) + 20:
+        return True
+    # Catch near-duplicates even with small source suffix/punctuation differences.
+    if _title_similarity(title, content) >= 0.90:
+        return True
+    # Extremely short content is usually snippet/noise, not article body.
+    if len(c) < 60:
+        return True
+    # Common noise patterns from scraped pages.
+    if "subscribe" in c or "credit" in c or "newsletter" in c:
         return True
     return False
 
