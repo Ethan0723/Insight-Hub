@@ -13,7 +13,8 @@ import feedparser
 import requests
 import trafilatura
 
-GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search?q=cross+border+ecommerce"
+from .config import get_default_rss_feeds
+
 REQUEST_HEADERS = {"User-Agent": "Insight-Hub-News-Pipeline/1.0"}
 
 
@@ -31,8 +32,11 @@ def _safe_publish_time(entry: Any) -> str | None:
 
 
 def _clean_html(text: str) -> str:
-    """Remove simple HTML tags from text."""
-    return re.sub(r"<.*?>", "", text)
+    """Remove basic HTML tags/entities from text."""
+    cleaned = re.sub(r"<.*?>", "", text or "")
+    cleaned = cleaned.replace("&nbsp;", " ")
+    cleaned = cleaned.replace("\xa0", " ")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _normalize_text(text: str) -> str:
@@ -98,12 +102,16 @@ def _extract_source_url(entry: Any) -> str | None:
 
 
 def resolve_article_url(rss_link: str, source_url: str | None = None) -> str:
-    """Resolve Google RSS link to the final article URL.
+    """Resolve RSS link to a final article URL.
 
-    If resolution fails or still points to news.google.com, fallback to source URL.
+    Google News RSS links often require redirect resolution. For other links, the
+    original link itself is usually already the final article URL.
     """
     if not rss_link:
         return source_url or ""
+
+    if "news.google.com" not in rss_link:
+        return rss_link
 
     try:
         response = requests.get(
@@ -133,7 +141,7 @@ def extract_full_content(url: str) -> str | None:
     try:
         response = requests.get(
             url,
-            timeout=10,
+            timeout=12,
             verify=certifi.where(),
             headers=REQUEST_HEADERS,
         )
@@ -144,7 +152,7 @@ def extract_full_content(url: str) -> str | None:
         if not extracted:
             return None
 
-        return extracted.strip()
+        return _clean_html(extracted)
     except Exception:
         return None
 
@@ -165,7 +173,6 @@ def _fetch_rss_entries(url: str) -> list[Any]:
         parsed = feedparser.parse(response.text)
         entries = getattr(parsed, "entries", []) or []
 
-        # Keep processing when bozo has warnings but entries are available.
         if getattr(parsed, "bozo", False) and not entries:
             print(f"[RSS] Parse error for {url}: {getattr(parsed, 'bozo_exception', 'unknown')}")
             return []
@@ -177,34 +184,39 @@ def _fetch_rss_entries(url: str) -> list[Any]:
 
 
 def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
-    """Fetch and normalize RSS news items.
+    """Fetch and normalize RSS news items from all configured feeds.
 
-    Returns a list of dict with fields:
+    Returns list items with:
     - title
-    - content (full article text when available; fallback to RSS summary/description)
-    - url
+    - content
+    - url (original rss link)
     - publish_time
-    - source (fixed to "Google News")
+    - source (feed source name)
     """
-    urls = feed_urls or [GOOGLE_NEWS_RSS_URL]
+    if feed_urls:
+        feeds = [{"name": "Custom Feed", "url": url} for url in feed_urls]
+    else:
+        feeds = get_default_rss_feeds()
+
     normalized_items: list[dict[str, Any]] = []
 
-    for url in urls:
-        entries = _fetch_rss_entries(url)
+    for feed in feeds:
+        feed_name = feed.get("name", "Unknown")
+        feed_url = feed.get("url", "")
+        entries = _fetch_rss_entries(feed_url)
+        print(f"[RSS] {feed_name}: {len(entries)} entries")
 
         for entry in entries:
-            title = getattr(entry, "title", "").strip()
-            summary = _clean_html(getattr(entry, "summary", "")).strip()
-            description = _clean_html(getattr(entry, "description", "")).strip()
+            title = _clean_html(getattr(entry, "title", ""))
+            summary = _clean_html(getattr(entry, "summary", ""))
+            description = _clean_html(getattr(entry, "description", ""))
             rss_link = getattr(entry, "link", "")
+
             source_url = _extract_source_url(entry)
             article_url = resolve_article_url(rss_link, source_url)
-
-            # Try full webpage extraction first, fallback to RSS text candidates.
             full_content = extract_full_content(article_url)
             content = _select_best_content(title, full_content, summary, description)
 
-            # Skip low-quality records where content is still empty/title-only.
             if not title or not content:
                 continue
 
@@ -214,7 +226,7 @@ def fetch_rss_items(feed_urls: list[str] | None = None) -> list[dict[str, Any]]:
                     "content": content,
                     "url": rss_link,
                     "publish_time": _safe_publish_time(entry),
-                    "source": "Google News",
+                    "source": feed_name,
                 }
             )
 
