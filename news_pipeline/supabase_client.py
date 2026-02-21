@@ -98,3 +98,27 @@ def get_news_without_summary() -> list[dict[str, Any]]:
         .execute()
     )
     return response.data or []
+
+
+def get_latest_publish_time() -> datetime | None:
+    """Return latest publish_time from news_raw, or None when table is empty."""
+    try:
+        response = (
+            _client.table(_TABLE)
+            .select("publish_time")
+            .order("publish_time", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = response.data or []
+        if not data:
+            return None
+        raw = data[0].get("publish_time")
+        if not raw:
+            return None
+        # Handle both "...Z" and offset formats.
+        normalized = str(raw).replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except Exception as exc:
+        print(f"[WARN] get_latest_publish_time failed | error={exc}")
+        return None

@@ -8,53 +8,38 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
-# RSS feeds that can be fetched in the current pipeline.
-# Note: API-only sources (IMF/World Bank/OECD/BLS/arXiv...) need dedicated clients
-# and are not part of RSS fetcher yet.
+# Curated, cross-border focused feed list.
+# We intentionally keep this list small and high-signal to reduce runtime noise.
 DEFAULT_RSS_FEEDS: list[dict[str, str]] = [
-    {"name": "Google News", "url": "https://news.google.com/rss/search?q=cross+border+ecommerce"},
-    {"name": "TechCrunch", "url": "https://techcrunch.com/feed/"},
-    {"name": "Tech in Asia", "url": "https://www.techinasia.com/feed"},
+    {
+        "name": "Google News - Cross Border Ecommerce",
+        "url": "https://news.google.com/rss/search?q=cross+border+ecommerce+OR+cross-border+policy+OR+customs+tariff",
+    },
+    {
+        "name": "Google News - Shopify Earnings",
+        "url": "https://news.google.com/rss/search?q=Shopify+earnings+OR+Shopify+quarterly+results+OR+Shopify+GMV",
+    },
+    {
+        "name": "Google News - Stripe Payments",
+        "url": "https://news.google.com/rss/search?q=Stripe+payments+OR+cross-border+payment+fees+OR+merchant+payment+policy",
+    },
+    {
+        "name": "Google News - Amazon/TikTok/Temu",
+        "url": "https://news.google.com/rss/search?q=Amazon+OR+TikTok+Shop+OR+Temu+cross-border+ecommerce",
+    },
+    {"name": "TechCrunch Ecommerce", "url": "https://techcrunch.com/category/e-commerce/feed/"},
     {"name": "PracticalEcommerce", "url": "https://www.practicalecommerce.com/feed"},
-    {"name": "EcommerceBytes", "url": "https://www.ecommercebytes.com/C/blog/blog.pl?/xml/rss20.xml"},
-    {"name": "亿邦动力", "url": "https://www.ebrun.com/rss/"},
-    {"name": "雨果网", "url": "https://www.cifnews.com/xmlconfig/YuGuo.xml"},
-    {"name": "36Kr", "url": "https://36kr.com/feed"},
-    {"name": "Shopify Blog", "url": "https://www.shopify.com/blog.atom"},
-    {"name": "Stripe Blog", "url": "https://stripe.com/blog/feed"},
-    {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml"},
-    {"name": "Anthropic Blog", "url": "https://www.anthropic.com/news/rss.xml"},
-    {"name": "Google Ads Blog", "url": "https://blog.google/products/ads-commerce/rss/"},
-    {"name": "Meta Ads Blog", "url": "https://www.facebook.com/business/news/rss"},
-    {"name": "AWS Blog", "url": "https://aws.amazon.com/blogs/aws/feed/"},
-    {"name": "NVIDIA News", "url": "https://nvidianews.nvidia.com/rss.xml"},
+    {"name": "Shopify Changelog", "url": "https://changelog.shopify.com/en/feed"},
+    # Shopify investor news RSS (if endpoint availability changes, keep Google News fallback above).
+    {
+        "name": "Shopify IR News",
+        "url": "https://investors.shopify.com/news-and-events/press-releases/default.aspx?output=1",
+    },
+    # Stripe official blog feed endpoint has been unstable; use docs changelog as official product signal.
+    {"name": "Stripe Docs Changelog", "url": "https://docs.stripe.com/changelog.rss"},
     {"name": "USTR", "url": "https://ustr.gov/about-us/policy-offices/press-office/press-releases/rss.xml"},
-    {"name": "CBP", "url": "https://www.cbp.gov/newsroom/rss.xml"},
-    {"name": "FTC", "url": "https://www.ftc.gov/news-events/news/rss"},
-    {"name": "Commerce Dept", "url": "https://www.commerce.gov/rss.xml"},
-    {"name": "White House", "url": "https://www.whitehouse.gov/briefing-room/feed/"},
     {"name": "EU Press", "url": "https://ec.europa.eu/commission/presscorner/api/rss"},
-    {"name": "WTO", "url": "https://www.wto.org/english/news_e/news_e.xml"},
-    {"name": "Amazon News", "url": "https://press.aboutamazon.com/rss"},
-    {"name": "eBay News", "url": "https://investors.ebayinc.com/rss/news-releases.xml"},
-    {"name": "Walmart News", "url": "https://corporate.walmart.com/rss.xml"},
-    {"name": "Alibaba Group", "url": "https://www.alibabagroup.com/en/news/rss"},
-    {"name": "Rakuten", "url": "https://global.rakuten.com/corp/news/rss.xml"},
-    {"name": "Adyen", "url": "https://www.adyen.com/blog/rss.xml"},
-    {"name": "PayPal", "url": "https://investor.pypl.com/news-releases/rss"},
-    {"name": "Airwallex", "url": "https://www.airwallex.com/blog/rss.xml"},
-    {"name": "Wise", "url": "https://wise.com/gb/blog/rss.xml"},
-    {"name": "Amazon Advertising", "url": "https://advertising.amazon.com/resources/whats-new/rss"},
-    {"name": "Pinterest Ads", "url": "https://business.pinterest.com/blog/rss/"},
-    {"name": "LinkedIn Ads", "url": "https://business.linkedin.com/marketing-solutions/blog/rss"},
-    {"name": "Google AI", "url": "https://blog.google/technology/ai/rss/"},
-    {"name": "Azure AI", "url": "https://azure.microsoft.com/en-us/blog/rss/"},
-    {"name": "AWS AI", "url": "https://aws.amazon.com/blogs/machine-learning/feed/"},
-    {"name": "IDC", "url": "https://www.idc.com/getdoc.jsp?containerId=prUS.xml"},
-    {"name": "Gartner", "url": "https://www.gartner.com/en/newsroom/rss"},
-    {"name": "Forrester", "url": "https://www.forrester.com/newsroom/rss/"},
-    {"name": "McKinsey", "url": "https://www.mckinsey.com/rss"},
-    {"name": "Deloitte", "url": "https://www2.deloitte.com/rss.xml"},
+    {"name": "WTO News", "url": "https://www.wto.org/english/news_e/news_e.xml"},
 ]
 
 
@@ -66,6 +51,8 @@ class PipelineConfig:
     supabase_service_role_key: str
     claude_api_url: str
     claude_api_key: str
+    enable_summary: bool
+    max_entries_per_feed: int
 
 
 def load_config() -> PipelineConfig:
@@ -76,6 +63,8 @@ def load_config() -> PipelineConfig:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         claude_api_url=os.getenv("CLAUDE_API_URL", ""),
         claude_api_key=os.getenv("CLAUDE_API_KEY", ""),
+        enable_summary=os.getenv("ENABLE_SUMMARY", "true").lower() == "true",
+        max_entries_per_feed=int(os.getenv("MAX_ENTRIES_PER_FEED", "80")),
     )
 
 
