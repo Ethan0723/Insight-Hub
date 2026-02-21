@@ -15,6 +15,7 @@ import certifi
 import feedparser
 import requests
 import trafilatura
+from bs4 import BeautifulSoup
 
 from .config import get_default_rss_feeds, load_config
 
@@ -165,6 +166,64 @@ def _select_best_content(
     return merged
 
 
+def _extract_json_ld_article_body(html: str) -> str | None:
+    """Try extracting article body from JSON-LD metadata."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        scripts = soup.find_all("script", attrs={"type": "application/ld+json"})
+        candidates: list[str] = []
+        for script in scripts:
+            text = script.string or script.get_text() or ""
+            if "articleBody" not in text:
+                continue
+            matches = re.findall(r'"articleBody"\s*:\s*"(.+?)"', text, flags=re.DOTALL)
+            for match in matches:
+                cleaned = _clean_html(match.replace('\\"', '"'))
+                if cleaned:
+                    candidates.append(cleaned)
+        if not candidates:
+            return None
+        candidates.sort(key=len, reverse=True)
+        return candidates[0]
+    except Exception:
+        return None
+
+
+def _extract_article_blocks(html: str) -> str | None:
+    """Fallback extractor based on visible article-like paragraph blocks."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        selectors = [
+            "article",
+            "[itemprop='articleBody']",
+            ".article-content",
+            ".post-content",
+            ".entry-content",
+            ".content-area",
+            "main",
+        ]
+
+        candidates: list[str] = []
+        for selector in selectors:
+            for node in soup.select(selector):
+                paragraphs = [_clean_html(p.get_text(" ", strip=True)) for p in node.find_all("p")]
+                paragraphs = [p for p in paragraphs if len(p) > 40]
+                if not paragraphs:
+                    continue
+                merged = " ".join(paragraphs).strip()
+                if merged:
+                    candidates.append(merged)
+            if candidates:
+                break
+
+        if not candidates:
+            return None
+        candidates.sort(key=len, reverse=True)
+        return candidates[0]
+    except Exception:
+        return None
+
+
 def _extract_source_url(entry: Any) -> str | None:
     """Read source URL from RSS entry when available."""
     source = getattr(entry, "source", None)
@@ -219,11 +278,27 @@ def extract_full_content(url: str) -> str | None:
         if response.status_code != 200:
             return None
 
-        extracted = trafilatura.extract(response.text)
-        if not extracted:
+        html = response.text
+        candidates: list[str] = []
+
+        primary = trafilatura.extract(html)
+        if primary:
+            candidates.append(_clean_html(primary))
+
+        json_ld_body = _extract_json_ld_article_body(html)
+        if json_ld_body:
+            candidates.append(_clean_html(json_ld_body))
+
+        block_body = _extract_article_blocks(html)
+        if block_body:
+            candidates.append(_clean_html(block_body))
+
+        candidates = [c for c in candidates if c]
+        if not candidates:
             return None
 
-        return _clean_html(extracted)
+        candidates.sort(key=len, reverse=True)
+        return candidates[0]
     except Exception:
         return None
 
