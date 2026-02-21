@@ -1,4 +1,4 @@
-import { SavedView } from '../types/domain';
+import { NewsId, SavedView } from '../types/domain';
 
 const KEYS = {
   favorites: 'sse:favorites',
@@ -17,19 +17,19 @@ function parse<T>(value: string | null, fallback: T): T {
 }
 
 export const storage = {
-  getFavorites(): number[] {
-    return parse<number[]>(localStorage.getItem(KEYS.favorites), []);
+  getFavorites(): NewsId[] {
+    return parse<NewsId[]>(localStorage.getItem(KEYS.favorites), []);
   },
-  toggleFavorite(id: number): number[] {
+  toggleFavorite(id: NewsId): NewsId[] {
     const list = storage.getFavorites();
     const next = list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
     localStorage.setItem(KEYS.favorites, JSON.stringify(next));
     return next;
   },
-  getReadNewsIds(): number[] {
-    return parse<number[]>(localStorage.getItem(KEYS.read), []);
+  getReadNewsIds(): NewsId[] {
+    return parse<NewsId[]>(localStorage.getItem(KEYS.read), []);
   },
-  markRead(id: number): number[] {
+  markRead(id: NewsId): NewsId[] {
     const list = storage.getReadNewsIds();
     const next = list.includes(id) ? list : [...list, id];
     localStorage.setItem(KEYS.read, JSON.stringify(next));

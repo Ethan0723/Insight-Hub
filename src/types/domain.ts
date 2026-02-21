@@ -1,5 +1,7 @@
+export type NewsId = string | number;
+
 export interface NewsItem {
-  id: number;
+  id: NewsId;
   title: string;
   source: string;
   publishDate: string;
@@ -39,7 +41,7 @@ export interface NewsQuery {
   dateFrom?: string;
   dateTo?: string;
   sortBy?: 'time' | 'impact' | 'risk';
-  ids?: number[];
+  ids?: NewsId[];
 }
 
 export interface PagedResult<T> {
@@ -52,7 +54,7 @@ export interface PagedResult<T> {
 export interface EvidenceLink {
   id: string;
   title: string;
-  newsIds: number[];
+  newsIds: NewsId[];
 }
 
 export interface IndexItem {
