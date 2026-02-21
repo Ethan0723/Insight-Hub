@@ -6,9 +6,10 @@ Responsible only for fetching and normalizing RSS news items.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import certifi
 import feedparser
@@ -25,6 +26,57 @@ REQUEST_HEADERS = {
     ),
     "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
 }
+
+
+def _build_google_news_windows(
+    feed_url: str,
+    min_publish_time: datetime | None,
+    window_days: int,
+    max_windows: int,
+) -> list[str]:
+    """Split a Google News RSS query into date windows to bypass 100-item cap."""
+    if "news.google.com/rss/search" not in feed_url:
+        return [feed_url]
+
+    if not min_publish_time:
+        return [feed_url]
+
+    now_utc = datetime.now(timezone.utc)
+    start = min_publish_time.astimezone(timezone.utc)
+    if start > now_utc:
+        return [feed_url]
+
+    parsed = urlparse(feed_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    base_q = (params.get("q", [""])[0] or "").strip()
+    if not base_q:
+        return [feed_url]
+
+    urls: list[str] = []
+    cursor = start
+    windows_count = 0
+    step = max(1, window_days)
+
+    while cursor < now_utc and windows_count < max_windows:
+        end = min(cursor + timedelta(days=step), now_utc + timedelta(days=1))
+        after_str = cursor.strftime("%Y-%m-%d")
+        before_str = end.strftime("%Y-%m-%d")
+        window_q = f"{base_q} after:{after_str} before:{before_str}"
+
+        window_params = dict(params)
+        window_params["q"] = [window_q]
+        query = urlencode(window_params, doseq=True)
+        window_url = urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, parsed.fragment)
+        )
+        urls.append(window_url)
+
+        cursor = end
+        windows_count += 1
+
+    if not urls:
+        return [feed_url]
+    return urls
 
 
 def _safe_publish_time(entry: Any) -> str | None:
@@ -221,42 +273,66 @@ def fetch_rss_items(
         feeds = get_default_rss_feeds()
 
     normalized_items: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
 
     for feed in feeds:
         feed_name = feed.get("name", "Unknown")
         feed_url = feed.get("url", "")
-        entries = _fetch_rss_entries(feed_url)
-        if cfg.max_entries_per_feed > 0:
-            entries = entries[: cfg.max_entries_per_feed]
-        print(f"[RSS] {feed_name}: {len(entries)} entries")
+        feed_urls_to_fetch = _build_google_news_windows(
+            feed_url=feed_url,
+            min_publish_time=min_publish_time,
+            window_days=cfg.google_window_days,
+            max_windows=cfg.max_google_windows,
+        )
 
-        for entry in entries:
-            raw_publish_time = _safe_publish_time(entry)
-            publish_dt = _parse_publish_time(raw_publish_time)
-            if min_publish_time and publish_dt and publish_dt < min_publish_time:
-                continue
+        total_entries = 0
+        for current_url in feed_urls_to_fetch:
+            entries = _fetch_rss_entries(current_url)
+            if cfg.max_entries_per_feed > 0:
+                entries = entries[: cfg.max_entries_per_feed]
+            total_entries += len(entries)
 
-            title = _clean_html(getattr(entry, "title", ""))
-            summary = _clean_html(getattr(entry, "summary", ""))
-            description = _clean_html(getattr(entry, "description", ""))
-            rss_link = getattr(entry, "link", "")
+            for entry in entries:
+                raw_publish_time = _safe_publish_time(entry)
+                publish_dt = _parse_publish_time(raw_publish_time)
+                if min_publish_time and publish_dt and publish_dt < min_publish_time:
+                    continue
 
-            source_url = _extract_source_url(entry)
-            article_url = resolve_article_url(rss_link, source_url)
-            full_content = extract_full_content(article_url)
-            content = _select_best_content(title, full_content, summary, description)
+                title = _clean_html(getattr(entry, "title", ""))
+                summary = _clean_html(getattr(entry, "summary", ""))
+                description = _clean_html(getattr(entry, "description", ""))
+                rss_link = getattr(entry, "link", "")
 
-            if not title or not content:
-                continue
+                source_url = _extract_source_url(entry)
+                article_url = resolve_article_url(rss_link, source_url)
+                full_content = extract_full_content(article_url)
+                content = _select_best_content(title, full_content, summary, description)
 
-            normalized_items.append(
-                {
-                    "title": title,
-                    "content": content,
-                    "url": rss_link,
-                    "publish_time": raw_publish_time,
-                    "source": feed_name,
-                }
+                if not title or not content:
+                    continue
+
+                # Deduplicate cross-window overlaps.
+                dedupe_key = f"{title}|{rss_link}"
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                normalized_items.append(
+                    {
+                        "title": title,
+                        "content": content,
+                        "url": rss_link,
+                        "publish_time": raw_publish_time,
+                        "source": feed_name,
+                    }
+                )
+
+        if len(feed_urls_to_fetch) > 1:
+            print(
+                f"[RSS] {feed_name}: {total_entries} entries "
+                f"across {len(feed_urls_to_fetch)} windows"
             )
+        else:
+            print(f"[RSS] {feed_name}: {total_entries} entries")
 
     return normalized_items

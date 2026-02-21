@@ -53,6 +53,8 @@ class PipelineConfig:
     claude_api_key: str
     enable_summary: bool
     max_entries_per_feed: int
+    google_window_days: int
+    max_google_windows: int
 
 
 def load_config() -> PipelineConfig:
@@ -65,6 +67,8 @@ def load_config() -> PipelineConfig:
         claude_api_key=os.getenv("CLAUDE_API_KEY", ""),
         enable_summary=os.getenv("ENABLE_SUMMARY", "true").lower() == "true",
         max_entries_per_feed=int(os.getenv("MAX_ENTRIES_PER_FEED", "80")),
+        google_window_days=int(os.getenv("GOOGLE_WINDOW_DAYS", "7")),
+        max_google_windows=int(os.getenv("MAX_GOOGLE_WINDOWS", "24")),
     )
 
 
