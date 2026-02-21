@@ -4,3 +4,4 @@ python-dotenv
 supabase
 trafilatura
 certifi
+beautifulsoup4
