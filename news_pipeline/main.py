@@ -22,7 +22,7 @@ from .supabase_client import (
 RUN_BACKFILL = False
 # RUN_BACKFILL = True
 RUN_TITLE_ZH_BACKFILL = False
-RUN_CLEANUP = False
+RUN_CLEANUP = True
 CLEANUP_DRY_RUN = True
 CLEANUP_SCAN_LIMIT = 5000
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
