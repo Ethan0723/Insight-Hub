@@ -38,3 +38,15 @@ python -m news_pipeline.main
 1. 定时抓取 RSS
 2. 调用 Claude 生成结构化摘要
 3. 写入 Supabase 供前端消费
+
+## 清理历史脏数据
+
+如果 `news_raw` 已有无关或低质量新闻，可使用清理模式：
+
+1. 打开 `news_pipeline/main.py`，设置：
+   - `RUN_CLEANUP = True`
+   - `CLEANUP_DRY_RUN = True`
+2. 运行：
+   - `python3 -m news_pipeline.main`
+3. 检查日志中的 `[CLEANUP-MARK]` 是否符合预期。
+4. 确认无误后，将 `CLEANUP_DRY_RUN = False` 再运行一次，执行真实删除。

@@ -204,6 +204,16 @@ def _is_relevant_news(title: str, content: str) -> bool:
     return False
 
 
+def is_relevant_news(title: str, content: str) -> bool:
+    """Public wrapper used by cleanup/backfill tasks."""
+    return _is_relevant_news(title, content)
+
+
+def is_low_quality_content(title: str, content: str) -> bool:
+    """Public wrapper used by cleanup/backfill tasks."""
+    return _is_low_quality_content(title, content)
+
+
 def generate_content_hash(content: str) -> str:
     """Generate md5 hash for deduplication."""
     normalized = (content or "").strip()

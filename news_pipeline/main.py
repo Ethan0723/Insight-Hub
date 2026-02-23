@@ -5,8 +5,14 @@ from datetime import datetime, timedelta, timezone
 from .ai_client import generate_summary
 from .config import load_config
 from .fetcher import fetch_rss_items
-from .processor import process_news_items
+from .processor import (
+    is_low_quality_content,
+    is_relevant_news,
+    process_news_items,
+)
 from .supabase_client import (
+    delete_news_by_ids,
+    fetch_news_raw_for_cleanup,
     get_latest_publish_time,
     get_news_missing_title_zh,
     get_news_without_summary,
@@ -16,6 +22,9 @@ from .supabase_client import (
 RUN_BACKFILL = False
 # RUN_BACKFILL = True
 RUN_TITLE_ZH_BACKFILL = False
+RUN_CLEANUP = False
+CLEANUP_DRY_RUN = True
+CLEANUP_SCAN_LIMIT = 5000
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 INCREMENTAL_BUFFER_HOURS = 1
 
@@ -73,6 +82,42 @@ def backfill_missing_title_zh() -> None:
             print(f"[TITLE_ZH_BACKFILL-ERROR] {index}/{total} id={news_id} | error={exc}")
 
 
+def cleanup_irrelevant_news() -> None:
+    """Delete existing irrelevant/low-quality rows from news_raw."""
+    rows = fetch_news_raw_for_cleanup(limit=CLEANUP_SCAN_LIMIT)
+    print(f"[CLEANUP] Scanned rows: {len(rows)}")
+
+    delete_ids: list[str] = []
+    for row in rows:
+        news_id = str(row.get("id", "")).strip()
+        title = str(row.get("title", "")).strip()
+        content = str(row.get("content", "")).strip()
+        summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+
+        reason = None
+        if not is_relevant_news(title, content):
+            reason = "irrelevant"
+        elif is_low_quality_content(title, content):
+            reason = "low_quality"
+        else:
+            tldr = str(summary.get("tldr", "")).strip()
+            score = summary.get("impact_score")
+            if tldr and "信息不足" in tldr and isinstance(score, (int, float)) and score <= 10:
+                reason = "low_confidence"
+
+        if reason and news_id:
+            delete_ids.append(news_id)
+            print(f"[CLEANUP-MARK] {news_id} | {reason} | {title}")
+
+    print(f"[CLEANUP] Marked for delete: {len(delete_ids)}")
+    if CLEANUP_DRY_RUN:
+        print("[CLEANUP] Dry run mode, no rows deleted.")
+        return
+
+    deleted = delete_news_by_ids(delete_ids)
+    print(f"[CLEANUP] Deleted rows: {deleted}")
+
+
 def _run_summary_generation(inserted_records: list[dict[str, str]], enable_summary: bool) -> None:
     """Generate summaries for newly inserted records with graceful network fallback."""
     if not enable_summary:
@@ -102,6 +147,9 @@ def main() -> None:
         return
     if RUN_TITLE_ZH_BACKFILL:
         backfill_missing_title_zh()
+        return
+    if RUN_CLEANUP:
+        cleanup_irrelevant_news()
         return
 
     incremental_start = _get_incremental_start_time()

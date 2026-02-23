@@ -151,3 +151,37 @@ def get_latest_publish_time() -> datetime | None:
     except Exception as exc:
         print(f"[WARN] get_latest_publish_time failed | error={exc}")
         return None
+
+
+def fetch_news_raw_for_cleanup(limit: int = 5000) -> list[dict[str, Any]]:
+    """Fetch rows for cleanup analysis."""
+    try:
+        response = (
+            _client.table(_TABLE)
+            .select("id,title,content,summary,source,url,publish_time")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception as exc:
+        print(f"[WARN] fetch_news_raw_for_cleanup failed | error={exc}")
+        return []
+
+
+def delete_news_by_ids(news_ids: list[str]) -> int:
+    """Delete rows by id and return attempted delete count."""
+    if not news_ids:
+        return 0
+    try:
+        # Batch to avoid oversized query.
+        batch_size = 200
+        deleted = 0
+        for i in range(0, len(news_ids), batch_size):
+            batch = news_ids[i : i + batch_size]
+            _client.table(_TABLE).delete().in_("id", batch).execute()
+            deleted += len(batch)
+        return deleted
+    except Exception as exc:
+        print(f"[WARN] delete_news_by_ids failed | error={exc}")
+        return 0
