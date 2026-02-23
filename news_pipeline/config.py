@@ -29,11 +29,10 @@ DEFAULT_RSS_FEEDS: list[dict[str, str]] = [
     },
     {"name": "TechCrunch Ecommerce", "url": "https://techcrunch.com/category/e-commerce/feed/"},
     {"name": "PracticalEcommerce", "url": "https://www.practicalecommerce.com/feed"},
-    {"name": "Shopify Changelog", "url": "https://changelog.shopify.com/en/feed"},
-    # Shopify investor news RSS (if endpoint availability changes, keep Google News fallback above).
+    {"name": "Shopify Blog", "url": "https://www.shopify.com/blog.atom"},
     {
-        "name": "Shopify IR News",
-        "url": "https://investors.shopify.com/news-and-events/press-releases/default.aspx?output=1",
+        "name": "Google News - Shopify Investors",
+        "url": "https://news.google.com/rss/search?q=site:investors.shopify.com+Shopify+press+release+OR+earnings",
     },
     # Stripe official blog feed endpoint has been unstable; use docs changelog as official product signal.
     {"name": "Stripe Docs Changelog", "url": "https://docs.stripe.com/changelog.rss"},

@@ -2,11 +2,11 @@
 
 `news_pipeline/` 是自动新闻抓取与处理模块的基础框架。
 
-当前阶段仅提供模板结构：
-- RSS 抓取入口（待实现）
-- Claude 总结入口（待实现）
-- Supabase 写入入口（待实现）
-- 主流程编排与运行入口
+当前阶段已支持：
+- RSS 抓取与正文提取
+- Claude 结构化摘要生成
+- Supabase 写入与回填
+- 主流程编排与增量运行
 
 ## 目录说明
 
@@ -25,7 +25,7 @@
 - `CLAUDE_API_URL`
 - `CLAUDE_API_KEY`
 
-## 本地运行（模板）
+## 本地运行
 
 ```bash
 pip install -r requirements.txt
