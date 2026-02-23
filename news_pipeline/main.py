@@ -8,8 +8,8 @@ from .fetcher import fetch_rss_items
 from .processor import process_news_items
 from .supabase_client import get_latest_publish_time, get_news_without_summary, update_summary
 
-# RUN_BACKFILL = False
-RUN_BACKFILL = True
+RUN_BACKFILL = False
+# RUN_BACKFILL = True
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 INCREMENTAL_BUFFER_HOURS = 1
 
