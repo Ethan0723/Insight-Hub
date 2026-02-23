@@ -100,6 +100,35 @@ def get_news_without_summary() -> list[dict[str, Any]]:
     return response.data or []
 
 
+def get_news_missing_title_zh(limit: int = 500) -> list[dict[str, Any]]:
+    """Return records where summary exists but title_zh is missing in summary JSON."""
+    try:
+        response = (
+            _client.table(_TABLE)
+            .select("id, title, content, summary")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows = response.data or []
+        missing: list[dict[str, Any]] = []
+        for row in rows:
+            summary = row.get("summary")
+            if not isinstance(summary, dict):
+                missing.append(
+                    {"id": row.get("id"), "title": row.get("title", ""), "content": row.get("content", "")}
+                )
+                continue
+            if not str(summary.get("title_zh", "")).strip():
+                missing.append(
+                    {"id": row.get("id"), "title": row.get("title", ""), "content": row.get("content", "")}
+                )
+        return missing
+    except Exception as exc:
+        print(f"[WARN] get_news_missing_title_zh failed | error={exc}")
+        return []
+
+
 def get_latest_publish_time() -> datetime | None:
     """Return latest publish_time from news_raw, or None when table is empty."""
     try:

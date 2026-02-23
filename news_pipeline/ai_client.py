@@ -21,6 +21,7 @@ PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分�
 
 输出 JSON 必须严格包含以下字段，且字段必须存在：
 {
+  "title_zh": "新闻中文标题（简洁准确，不超过40字）",
   "tldr": "一句话战略判断（<=120字）",
   "impact_score": 0,
   "risk_level": "低",
@@ -97,6 +98,7 @@ def _strip_code_fence(text: str) -> str:
 
 def _default_payload(reason: str) -> dict[str, Any]:
     return {
+        "title_zh": "（待翻译）",
         "tldr": f"信息不足，判断置信度较低。原因：{reason}",
         "impact_score": 25,
         "risk_level": "低",
@@ -116,9 +118,10 @@ def _default_payload(reason: str) -> dict[str, Any]:
 
 
 
-def _normalize_payload(payload: dict[str, Any], content: str) -> dict[str, Any]:
+def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dict[str, Any]:
     result = _default_payload("模型输出缺失字段")
 
+    result["title_zh"] = str(payload.get("title_zh") or title or result["title_zh"])[:40]
     result["tldr"] = str(payload.get("tldr") or result["tldr"])[:120]
 
     score = payload.get("impact_score", result["impact_score"])
@@ -219,4 +222,4 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
     except Exception:
         return _default_payload("模型未返回合法 JSON")
 
-    return _normalize_payload(raw_json, content)
+    return _normalize_payload(raw_json, title, content)

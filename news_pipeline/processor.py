@@ -73,6 +73,65 @@ IMPACT_KEYWORDS = {
     "ai",
 }
 
+IRRELEVANT_KEYWORDS = {
+    "militant",
+    "airstrike",
+    "seismic",
+    "earthquake",
+    "terror",
+    "killed",
+    "military",
+    "football",
+    "cricket",
+    "celebrity",
+    "crime",
+    "homicide",
+    "weather alert",
+    "entertainment",
+    "sports",
+    "战争",
+    "地震",
+    "军事",
+    "恐怖",
+    "体育",
+    "娱乐",
+    "犯罪",
+}
+
+BUSINESS_SIGNAL_KEYWORDS = {
+    "platform",
+    "merchant",
+    "seller",
+    "checkout",
+    "gmv",
+    "subscription",
+    "commission",
+    "payment",
+    "logistics",
+    "fulfillment",
+    "tariff",
+    "customs",
+    "tax",
+    "vat",
+    "regulation",
+    "compliance",
+    "shopify",
+    "amazon",
+    "tiktok",
+    "temu",
+    "shopline",
+    "shoplazza",
+    "平台",
+    "商家",
+    "支付",
+    "物流",
+    "关税",
+    "监管",
+    "合规",
+    "佣金",
+    "订阅",
+}
+
 
 def _normalize_text(text: str) -> str:
     normalized = re.sub(r"\s+", " ", (text or "")).strip().lower()
@@ -126,13 +185,20 @@ def _is_relevant_news(title: str, content: str) -> bool:
     has_cross_border = _contains_any(text, CROSS_BORDER_KEYWORDS)
     has_ecommerce = _contains_any(text, ECOMMERCE_KEYWORDS)
     has_impact = _contains_any(text, IMPACT_KEYWORDS)
+    has_business_signal = _contains_any(text, BUSINESS_SIGNAL_KEYWORDS)
+    has_irrelevant_signal = _contains_any(text, IRRELEVANT_KEYWORDS)
 
-    # Primary: clearly cross-border related.
-    if has_cross_border:
+    # Drop generic geo/political/security stories unless they also contain
+    # explicit ecommerce/business platform signals.
+    if has_irrelevant_signal and not (has_ecommerce or has_business_signal):
+        return False
+
+    # Primary: cross-border + business/ecommerce context.
+    if has_cross_border and (has_ecommerce or has_business_signal):
         return True
 
     # Secondary: ecommerce + strategic impact signals.
-    if has_ecommerce and has_impact:
+    if has_ecommerce and (has_impact or has_business_signal):
         return True
 
     return False

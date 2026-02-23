@@ -92,7 +92,9 @@ function normalizeImpactDimensions(summaryObj: any, moduleTags: string[]): Array
 
 function toNewsItem(row: any): NewsItem {
   const summaryObj = typeof row.summary === 'string' ? safeParseJson(row.summary) : row.summary || {};
-  const title = String(row.title || '').trim() || 'Untitled';
+  const rawTitle = String(row.title || '').trim();
+  const titleZh = String(summaryObj?.title_zh || '').trim();
+  const title = titleZh || rawTitle || 'Untitled';
   const content = String(row.content || '').trim();
   const baseText = [title, content, JSON.stringify(summaryObj || {})].join(' ');
   const moduleTags = Array.from(
@@ -161,6 +163,57 @@ function toNewsItem(row: any): NewsItem {
     actions,
     evidenceContribution: Math.max(30, Math.round(impactScore * 0.88))
   };
+}
+
+function isClearlyIrrelevant(item: NewsItem): boolean {
+  const text = `${item.title} ${item.summary} ${item.aiTldr} ${item.moduleTags.join(' ')}`.toLowerCase();
+  const irrelevantSignals = [
+    'militant',
+    'airstrike',
+    'seismic',
+    'earthquake',
+    'terror',
+    'military',
+    'cricket',
+    'football',
+    'sports',
+    'entertainment',
+    '战争',
+    '地震',
+    '军事',
+    '恐怖',
+    '体育',
+    '娱乐',
+    '非相关',
+    '非业务相关'
+  ];
+  const ecommerceSignals = [
+    'ecommerce',
+    '跨境',
+    '电商',
+    'shopify',
+    'amazon',
+    'temu',
+    'tiktok',
+    'shopline',
+    'shoplazza',
+    'payment',
+    'checkout',
+    'merchant',
+    'seller',
+    'logistics',
+    'fulfillment',
+    'tariff',
+    'customs',
+    '关税',
+    '支付',
+    '物流',
+    '平台'
+  ];
+  const hasIrrelevant = irrelevantSignals.some((s) => text.includes(s));
+  const hasEcommerce = ecommerceSignals.some((s) => text.includes(s));
+  const tooLowConfidence = item.impactScore <= 10 && item.aiTldr.includes('信息不足');
+  return (hasIrrelevant && !hasEcommerce) || tooLowConfidence;
 }
 
 function safeParseJson(value: string): any {
@@ -262,7 +315,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
 
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
-  return rows.map(toNewsItem).filter((item) => Boolean(item.id));
+  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
 async function getSupabaseNewsCached(force = false): Promise<NewsItem[]> {

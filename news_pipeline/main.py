@@ -6,10 +6,16 @@ from .ai_client import generate_summary
 from .config import load_config
 from .fetcher import fetch_rss_items
 from .processor import process_news_items
-from .supabase_client import get_latest_publish_time, get_news_without_summary, update_summary
+from .supabase_client import (
+    get_latest_publish_time,
+    get_news_missing_title_zh,
+    get_news_without_summary,
+    update_summary,
+)
 
 RUN_BACKFILL = False
 # RUN_BACKFILL = True
+RUN_TITLE_ZH_BACKFILL = False
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 INCREMENTAL_BUFFER_HOURS = 1
 
@@ -48,6 +54,25 @@ def backfill_all_missing_summaries() -> None:
             print(f"[BACKFILL-ERROR] {index}/{total} id={news_id} | error={exc}")
 
 
+def backfill_missing_title_zh() -> None:
+    """Regenerate summary JSON for rows missing `summary.title_zh`."""
+    records = get_news_missing_title_zh(limit=2000)
+    total = len(records)
+    print(f"[TITLE_ZH_BACKFILL] Found {total} records missing summary.title_zh")
+
+    for index, record in enumerate(records, start=1):
+        news_id = record.get("id", "")
+        title = record.get("title", "")
+        content = record.get("content", "")
+
+        try:
+            summary = generate_summary(title, content)
+            update_summary(news_id, summary)
+            print(f"[TITLE_ZH_BACKFILL] {index}/{total} updated | id={news_id} | title={title}")
+        except Exception as exc:
+            print(f"[TITLE_ZH_BACKFILL-ERROR] {index}/{total} id={news_id} | error={exc}")
+
+
 def _run_summary_generation(inserted_records: list[dict[str, str]], enable_summary: bool) -> None:
     """Generate summaries for newly inserted records with graceful network fallback."""
     if not enable_summary:
@@ -74,6 +99,9 @@ def main() -> None:
 
     if RUN_BACKFILL:
         backfill_all_missing_summaries()
+        return
+    if RUN_TITLE_ZH_BACKFILL:
+        backfill_missing_title_zh()
         return
 
     incremental_start = _get_incremental_start_time()
