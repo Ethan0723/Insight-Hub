@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import MethodPopover from './ui/MethodPopover';
 
 function Sparkline({ points }) {
   const max = Math.max(...points);
@@ -93,10 +92,7 @@ function ReasoningEngine({ insight, scoreBreakdown, onOpenEvidence }) {
         }`}
       >
         <article className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-400/5 p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <p className="text-sm font-medium text-cyan-200">模型口径说明</p>
-            <MethodPopover />
-          </div>
+          <p className="mb-2 text-sm font-medium text-cyan-200">模型口径说明</p>
           <div className="grid gap-2 text-xs text-slate-300 md:grid-cols-3">
             <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-2">
               <p className="text-slate-400">Baseline</p>
