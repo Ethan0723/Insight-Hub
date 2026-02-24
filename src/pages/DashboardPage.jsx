@@ -28,10 +28,6 @@ function DashboardPage({
         <StrategicOverview brief={insight.brief} indexes={insight.indexes} onOpenEvidence={onOpenEvidence} />
       </div>
 
-      <div id="reasoning">
-        <ReasoningEngine insight={insight} scoreBreakdown={scoreBreakdown} onOpenEvidence={onOpenEvidence} />
-      </div>
-
       <div id="revenue">
         <RevenueImpact
           insight={insight}
@@ -43,6 +39,10 @@ function DashboardPage({
           scoreBreakdown={scoreBreakdown}
           onOpenEvidence={onOpenEvidence}
         />
+      </div>
+
+      <div id="reasoning">
+        <ReasoningEngine insight={insight} scoreBreakdown={scoreBreakdown} onOpenEvidence={onOpenEvidence} />
       </div>
 
       <div id="feed">
