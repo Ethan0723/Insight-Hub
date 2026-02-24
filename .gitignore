@@ -1,0 +1,14 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Build
+/dist
+
+# Python cache
+__pycache__/
+news_pipeline/__pycache__/
+
+# Node
+node_modules/

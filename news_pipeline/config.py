@@ -81,8 +81,8 @@ class PipelineConfig:
 
     supabase_url: str
     supabase_service_role_key: str
-    claude_api_url: str
-    claude_api_key: str
+    llm_api_url: str
+    llm_api_key: str
     enable_summary: bool
     max_entries_per_feed: int
     google_window_days: int
@@ -95,8 +95,8 @@ def load_config() -> PipelineConfig:
     return PipelineConfig(
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
-        claude_api_url=os.getenv("CLAUDE_API_URL", ""),
-        claude_api_key=os.getenv("CLAUDE_API_KEY", ""),
+        llm_api_url=os.getenv("LLM_API_URL", os.getenv("CLAUDE_API_URL", "")),
+        llm_api_key=os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", "")),
         enable_summary=os.getenv("ENABLE_SUMMARY", "true").lower() == "true",
         max_entries_per_feed=int(os.getenv("MAX_ENTRIES_PER_FEED", "80")),
         google_window_days=int(os.getenv("GOOGLE_WINDOW_DAYS", "7")),

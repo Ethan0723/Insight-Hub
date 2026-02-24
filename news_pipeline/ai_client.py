@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CLAUDE_API_URL = os.getenv("CLAUDE_API_URL", "https://litellm.shoplazza.site/chat/completions")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+LLM_API_URL = os.getenv("LLM_API_URL", os.getenv("CLAUDE_API_URL", "https://litellm.shoplazza.site/chat/completions"))
+LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", ""))
 MODEL = "bedrock-claude-4-5-sonnet"
 
 PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分析师。
@@ -190,8 +190,8 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
 def generate_summary(title: str, content: str) -> dict[str, Any]:
     """Call Claude API and return normalized structured JSON summary."""
 
-    if not CLAUDE_API_KEY:
-        raise ValueError("Missing CLAUDE_API_KEY in environment.")
+    if not LLM_API_KEY:
+        raise ValueError("Missing LLM_API_KEY in environment.")
 
     # PROMPT_TEMPLATE contains many JSON braces; avoid str.format() to prevent
     # accidental placeholder parsing for fields like "tldr".
@@ -200,7 +200,7 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
     )
 
     headers = {
-        "Authorization": f"Bearer {CLAUDE_API_KEY}",
+        "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -209,7 +209,7 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
         "temperature": 0.1,
     }
 
-    response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=60)
+    response = requests.post(LLM_API_URL, headers=headers, json=payload, timeout=60)
     response.raise_for_status()
 
     text = _extract_response_text(response.json())

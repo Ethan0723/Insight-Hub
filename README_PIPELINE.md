@@ -4,7 +4,7 @@
 
 当前阶段已支持：
 - RSS 抓取与正文提取
-- Claude 结构化摘要生成
+- LLM 结构化摘要生成
 - Supabase 写入与回填
 - 主流程编排与增量运行
 
@@ -22,8 +22,12 @@
 请复制 `.env.example` 并填写：
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `CLAUDE_API_URL`
-- `CLAUDE_API_KEY`
+- `LLM_API_URL`
+- `LLM_API_KEY`
+
+说明：
+- Python pipeline 与 Node AI 服务统一使用 `LLM_API_URL` / `LLM_API_KEY`。
+- 代码层已兼容旧变量名 `CLAUDE_API_URL` / `CLAUDE_API_KEY`，但建议迁移后删除旧变量。
 
 ## 本地运行
 
@@ -36,7 +40,7 @@ python -m news_pipeline.main
 
 未来通过 GitHub Actions 定时运行该模块，实现：
 1. 定时抓取 RSS
-2. 调用 Claude 生成结构化摘要
+2. 调用 LLM 生成结构化摘要
 3. 写入 Supabase 供前端消费
 
 ## 清理历史脏数据
