@@ -9,10 +9,9 @@ function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-700/70">
-        <div className="grid grid-cols-6 bg-slate-900 px-4 py-3 text-xs text-slate-400">
+        <div className="grid grid-cols-5 bg-slate-900 px-4 py-3 text-xs text-slate-400">
           <span>平台</span>
           <span>本周关键动作</span>
-          <span>财报亮点</span>
           <span>产品更新</span>
           <span>AI 动态</span>
           <span>引用新闻</span>
@@ -20,10 +19,9 @@ function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
 
         <div className="divide-y divide-slate-800 bg-slate-950/60">
           {rows.map((item) => (
-            <div key={item.name} className="grid grid-cols-6 gap-3 px-4 py-4 text-xs text-slate-200">
+            <div key={item.name} className="grid grid-cols-5 gap-3 px-4 py-4 text-xs text-slate-200">
               <p className="font-semibold text-cyan-200">{item.name}</p>
               <p>{item.weeklyMove}</p>
-              <p>{item.earningsHighlight}</p>
               <p>{item.productUpdate}</p>
               <p>{item.aiUpdate}</p>
               <div className="space-y-2">

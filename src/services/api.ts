@@ -31,15 +31,36 @@ function normalizeRiskLevel(value: unknown): '低' | '中' | '高' {
   return '中';
 }
 
-function inferPlatform(title: string): string {
+function inferPlatform(title: string, source = '', originalUrl = ''): string {
   const t = title.toLowerCase();
-  if (t.includes('shopify')) return 'Shopify';
-  if (t.includes('shopline')) return 'Shopline';
-  if (t.includes('shoplazza')) return 'Shoplazza';
-  if (t.includes('amazon')) return 'Amazon';
-  if (t.includes('tiktok')) return 'TikTok Shop';
-  if (t.includes('temu')) return 'Temu';
+  const s = source.toLowerCase();
+  const u = originalUrl.toLowerCase();
+
+  const hasNegatedShopify = isNegatedShopifyTitle(title);
+
+  const isOfficial = (patterns: string[]) => patterns.some((p) => s.includes(p) || u.includes(p));
+
+  if (isOfficial(['shopify.com', 'investors.shopify.com']) && !hasNegatedShopify) return 'Shopify';
+  if (isOfficial(['aboutamazon.com', 'amazon.com'])) return 'Amazon';
+  if (isOfficial(['newsroom.tiktok.com', 'tiktok.com'])) return 'TikTok Shop';
+  if (isOfficial(['temu.com', 'pddholdings.com'])) return 'Temu';
+
+  // Non-official sources: only map when platform is clearly headline subject and not negated.
+  if (!hasNegatedShopify && /^(shopify|\[shopify\]|shopify[:：-])/.test(t)) return 'Shopify';
+  if (/^(amazon|\[amazon\]|amazon[:：-])/.test(t)) return 'Amazon';
+  if (/^(tiktok|tiktok shop|\[tiktok\]|tiktok[:：-])/.test(t)) return 'TikTok Shop';
+  if (/^(temu|\[temu\]|temu[:：-])/.test(t)) return 'Temu';
+
   return 'Global';
+}
+
+function isNegatedShopifyTitle(title: string): boolean {
+  const t = title.toLowerCase();
+  return (
+    /(not|without|instead of|vs|leave|left)\s+shopify/.test(t) ||
+    /shopify\s+(not|without|instead of|vs)/.test(t) ||
+    /没有(选择|采用)?\s*shopify/.test(title)
+  );
 }
 
 function inferModuleTags(text: string): string[] {
@@ -143,7 +164,9 @@ function toNewsItem(row: any): NewsItem {
     : 60;
 
   const source = String(row.source || 'Unknown').trim();
-  const platform = String(row.platform || summaryObj?.platform || '').trim() || inferPlatform(title);
+  const inferredPlatform = inferPlatform(title, source, String(row.url || ''));
+  const rawPlatform = String(row.platform || summaryObj?.platform || '').trim();
+  const platform = isNegatedShopifyTitle(title) && rawPlatform === 'Shopify' ? 'Global' : rawPlatform || inferredPlatform;
   const region = String(row.region || summaryObj?.region || '').trim() || 'Global';
 
   return {
@@ -234,6 +257,16 @@ function safeParseJson(value: string): any {
   } catch {
     return {};
   }
+}
+
+function pickChineseText(candidates: Array<string | undefined>, fallback: string): string {
+  const cleaned = candidates
+    .map((t) => String(t || '').trim())
+    .filter(Boolean);
+  for (const text of cleaned) {
+    if (/[\u4e00-\u9fff]/.test(text)) return text;
+  }
+  return fallback;
 }
 
 function paginate<T>(list: T[], page = 1, pageSize = 9): PagedResult<T> {
@@ -463,7 +496,7 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
 
 function buildMatrix(news: NewsItem[]): MatrixRow[] {
   if (news.length === 0) return mockMatrix;
-  const targetPlatforms = ['Shopify', 'Shopline', 'Shoplazza', 'Amazon', 'TikTok Shop', 'Temu'];
+  const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
 
   return targetPlatforms.map((platform) => {
     const rows = news.filter((item) => item.platform === platform).slice(0, 4);
@@ -473,10 +506,15 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
 
     return {
       name: platform,
-      weeklyMove: first?.title || fallback,
-      earningsHighlight: rows.find((n) => n.moduleTags.includes('财报'))?.aiTldr || '未发现明确财报事件',
-      productUpdate: rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.summary || '暂无显著产品更新',
-      aiUpdate: rows.find((n) => n.moduleTags.includes('AI'))?.aiTldr || '暂无明确 AI 动态',
+      weeklyMove: pickChineseText([first?.title, first?.aiTldr], fallback),
+      productUpdate: pickChineseText(
+        [
+          rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.summary,
+          rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.aiTldr
+        ],
+        '暂无显著产品更新'
+      ),
+      aiUpdate: pickChineseText([rows.find((n) => n.moduleTags.includes('AI'))?.aiTldr], '暂无明确 AI 动态'),
       evidence: {
         id: `ev-m-${platform.toLowerCase().replace(/\s+/g, '-')}`,
         title: `${platform} 竞争引用`,

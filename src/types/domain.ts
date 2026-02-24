@@ -87,7 +87,6 @@ export interface DailyInsight {
 export interface MatrixRow {
   name: string;
   weeklyMove: string;
-  earningsHighlight: string;
   productUpdate: string;
   aiUpdate: string;
   evidence: EvidenceLink;
