@@ -1,3 +1,5 @@
+import MethodPopover from './ui/MethodPopover';
+
 function Sparkline({ points }) {
   const max = Math.max(...points);
   const min = Math.min(...points);
@@ -37,12 +39,7 @@ function ReasoningEngine({ insight, scoreBreakdown, onOpenEvidence }) {
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">战略影响推理引擎</h2>
         <div className="flex items-center gap-2">
-          <span
-            title="Baseline：外部态势（新闻驱动） | Δ：策略参数变化（沙盘仿真） | Final：Baseline+Δ（用于优先级决策）"
-            className="cursor-help rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-200"
-          >
-            ⓘ 口径说明
-          </span>
+          <MethodPopover />
           <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-3 py-1 text-xs text-fuchsia-200">
             最近更新: {insight.updatedAt}
           </span>

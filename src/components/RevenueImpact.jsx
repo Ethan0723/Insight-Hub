@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import MethodPopover from './ui/MethodPopover';
 
 function TrendChart({ labels, base, adjusted }) {
   const max = Math.max(...base, ...adjusted);
@@ -97,12 +98,7 @@ function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onO
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
         <div className="flex items-center gap-2">
-          <span
-            title="Baseline：外部态势（新闻驱动） | Δ：策略参数变化（沙盘仿真） | Final：Baseline+Δ（用于优先级决策）"
-            className="cursor-help rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-200"
-          >
-            ⓘ 口径说明
-          </span>
+          <MethodPopover />
           <button
             type="button"
             onClick={() => onOpenEvidence(result.evidence)}
