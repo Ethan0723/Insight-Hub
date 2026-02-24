@@ -27,6 +27,7 @@ function NewsLibraryPage({
     ids: []
   });
   const [newsPage, setNewsPage] = useState({ list: [], total: 0, page: 1, pageSize: 9 });
+  const [stats, setStats] = useState({ total: 0, highRisk: 0, thisWeek: 0, avgImpact: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [savedViews, setSavedViews] = useState(storage.getSavedViews());
@@ -43,10 +44,28 @@ function NewsLibraryPage({
     setLoading(true);
     setError('');
 
-    api
-      .searchNews(query)
-      .then((res) => {
-        if (mounted) setNewsPage(res);
+    Promise.all([api.searchNews(query), api.searchNews({ ...query, page: 1, pageSize: 5000 })])
+      .then(([pageRes, fullRes]) => {
+        if (!mounted) return;
+        setNewsPage(pageRes);
+
+        const now = new Date();
+        const highRisk = fullRes.list.filter((item) => item.riskLevel === '高').length;
+        const thisWeek = fullRes.list.filter((item) => {
+          const diff = (now.getTime() - new Date(item.publishDate).getTime()) / (1000 * 60 * 60 * 24);
+          return diff >= 0 && diff <= 7;
+        }).length;
+        const avgImpact =
+          fullRes.list.length > 0
+            ? Math.round(fullRes.list.reduce((sum, item) => sum + item.impactScore, 0) / fullRes.list.length)
+            : 0;
+
+        setStats({
+          total: fullRes.total,
+          highRisk,
+          thisWeek,
+          avgImpact
+        });
       })
       .catch(() => {
         if (mounted) setError('加载新闻失败，请稍后重试。');
@@ -64,22 +83,6 @@ function NewsLibraryPage({
   const allRegions = useMemo(() => ['US', 'EU', 'UK', 'SEA', 'Global'], []);
   const allModules = useMemo(() => ['政策', '平台', '财报', '支付', '广告', '物流', 'AI', '宏观'], []);
   const allDims = useMemo(() => ['订阅', '佣金', '支付', '生态'], []);
-
-  const stats = useMemo(() => {
-    const total = newsPage.total;
-    const highRisk = newsPage.list.filter((item) => item.riskLevel === '高').length;
-    const now = new Date();
-    const thisWeek = newsPage.list.filter((item) => {
-      const diff = (now.getTime() - new Date(item.publishDate).getTime()) / (1000 * 60 * 60 * 24);
-      return diff >= 0 && diff <= 7;
-    }).length;
-    const avgImpact =
-      newsPage.list.length > 0
-        ? Math.round(newsPage.list.reduce((sum, item) => sum + item.impactScore, 0) / newsPage.list.length)
-        : 0;
-
-    return { total, highRisk, thisWeek, avgImpact };
-  }, [newsPage]);
 
   const totalPages = Math.max(1, Math.ceil(newsPage.total / query.pageSize));
 
