@@ -10,6 +10,10 @@ export function calculateRevenueImpact(scenario: RevenueScenario): RevenueImpact
   const commissionFactor = scenario.commissionDelta * 180;
   const payFactor = scenario.paymentSuccessDelta * 0.12;
   const totalFactor = arpuFactor + commissionFactor + payFactor;
+  const subscriptionDelta = scenario.arpuDelta * 20;
+  const commissionDelta = scenario.commissionDelta * 25;
+  const paymentDelta = scenario.paymentSuccessDelta * 20;
+  const ecosystemDelta = totalFactor * 10;
 
   const adjustedTrend = baseTrend.map((value, index) => {
     const step = totalFactor * (0.6 + index * 0.08);
@@ -33,28 +37,28 @@ export function calculateRevenueImpact(scenario: RevenueScenario): RevenueImpact
       {
         id: 'subscription',
         name: '订阅',
-        score: Math.round(58 + scenario.arpuDelta * 1.2),
+        delta: Math.round(subscriptionDelta),
         sensitivity: 'ARPU 变化直接影响 MRR，AI 高阶功能可缓冲价格压力。',
         evidence: { id: 'ev-re-sub', title: '订阅维度引用', newsIds: [101, 109] }
       },
       {
         id: 'commission',
         name: '佣金',
-        score: Math.round(72 + scenario.commissionDelta * 50),
+        delta: Math.round(commissionDelta),
         sensitivity: '佣金率与 GMV 增速共同决定抽佣收入波动。',
         evidence: { id: 'ev-re-com', title: '佣金维度引用', newsIds: [103, 105, 107, 112] }
       },
       {
         id: 'payment',
         name: '支付',
-        score: Math.round(66 + scenario.paymentSuccessDelta * 2.6),
+        delta: Math.round(paymentDelta),
         sensitivity: '支付成功率和拒付率对净收益影响显著。',
         evidence: { id: 'ev-re-pay', title: '支付维度引用', newsIds: [102, 104, 108, 110] }
       },
       {
         id: 'ecosystem',
         name: '生态',
-        score: Math.round(69 + totalFactor * 3),
+        delta: Math.round(ecosystemDelta),
         sensitivity: '生态协同能力决定中长期留存和扩张效率。',
         evidence: { id: 'ev-re-eco', title: '生态维度引用', newsIds: [101, 106, 111] }
       }

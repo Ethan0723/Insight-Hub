@@ -5,12 +5,14 @@ import {
   NewsItem,
   NewsQuery,
   PagedResult,
+  ScoreBreakdown,
   RevenueImpactResult,
   RevenueScenario
 } from '../types/domain';
 import { mockNews } from '../data/mock/news';
 import { mockAssistant, mockDailyInsight, mockMatrix, mockModelExplainers } from '../data/mock/dashboard';
 import { calculateRevenueImpact } from '../data/mock/revenue';
+import { combineFinalScore } from './score';
 
 const delay = (ms = 220) => new Promise((resolve) => setTimeout(resolve, ms));
 const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
@@ -511,6 +513,60 @@ function enrichRevenueWithEvidence(base: RevenueImpactResult, news: NewsItem[]):
   };
 }
 
+function getDimensionScoreByName(insight: DailyInsight, name: string): number {
+  return insight.dimensions.find((item) => item.name === name)?.score ?? 0;
+}
+
+function getDimensionDeltaById(revenue: RevenueImpactResult, id: string): number {
+  return revenue.dimensions.find((item) => item.id === id)?.delta ?? 0;
+}
+
+function buildScoreBreakdown(news: NewsItem[], scenario: RevenueScenario): ScoreBreakdown {
+  const insight = buildDailyInsight(news);
+  const revenue = enrichRevenueWithEvidence(calculateRevenueImpact(scenario), news);
+
+  const baseline = {
+    subscription: getDimensionScoreByName(insight, '订阅'),
+    commission: getDimensionScoreByName(insight, '佣金'),
+    payment: getDimensionScoreByName(insight, '支付'),
+    ecosystem: getDimensionScoreByName(insight, '生态'),
+    overall: insight.impactScore
+  };
+
+  const delta = {
+    subscription: getDimensionDeltaById(revenue, 'subscription'),
+    commission: getDimensionDeltaById(revenue, 'commission'),
+    payment: getDimensionDeltaById(revenue, 'payment'),
+    ecosystem: getDimensionDeltaById(revenue, 'ecosystem'),
+    overall: Math.round(
+      (getDimensionDeltaById(revenue, 'subscription') +
+        getDimensionDeltaById(revenue, 'commission') +
+        getDimensionDeltaById(revenue, 'payment') +
+        getDimensionDeltaById(revenue, 'ecosystem')) /
+        4
+    )
+  };
+
+  const final = combineFinalScore(baseline, delta);
+
+  return {
+    baseline,
+    delta,
+    final,
+    explain: {
+      baselineMethod: 'Baseline：外部态势（新闻驱动，leading indicator）。',
+      deltaMethod: 'Δ：策略参数变化（沙盘仿真，what-if）。',
+      notes: ['Final = clamp(Baseline + Δ, 0..100)', 'Final 用于策略优先级决策。']
+    },
+    evidence: {
+      subscription: insight.dimensions.find((item) => item.name === '订阅')?.evidence.newsIds || [],
+      commission: insight.dimensions.find((item) => item.name === '佣金')?.evidence.newsIds || [],
+      payment: insight.dimensions.find((item) => item.name === '支付')?.evidence.newsIds || [],
+      ecosystem: insight.dimensions.find((item) => item.name === '生态')?.evidence.newsIds || []
+    }
+  };
+}
+
 async function getRealOrMockNews(force = false): Promise<NewsItem[]> {
   if (!hasSupabaseConfig()) return fallbackNews();
   try {
@@ -570,6 +626,11 @@ export const api = {
     await delay(160);
     const result = calculateRevenueImpact(scenario);
     return enrichRevenueWithEvidence(result, await getRealOrMockNews());
+  },
+
+  async getScoreBreakdown(scenario: RevenueScenario): Promise<ScoreBreakdown> {
+    await delay(140);
+    return buildScoreBreakdown(await getRealOrMockNews(), scenario);
   },
 
   async getAppMeta() {

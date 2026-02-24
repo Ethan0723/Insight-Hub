@@ -10,6 +10,7 @@ function DashboardPage({
   matrix,
   explainers,
   revenueResult,
+  scoreBreakdown,
   revenueScenario,
   onRevenueScenarioChange,
   news,
@@ -27,7 +28,7 @@ function DashboardPage({
       </div>
 
       <div id="reasoning">
-        <ReasoningEngine insight={insight} onOpenEvidence={onOpenEvidence} />
+        <ReasoningEngine insight={insight} scoreBreakdown={scoreBreakdown} onOpenEvidence={onOpenEvidence} />
       </div>
 
       <div id="revenue">
@@ -35,6 +36,7 @@ function DashboardPage({
           scenario={revenueScenario}
           onScenarioChange={onRevenueScenarioChange}
           result={revenueResult}
+          scoreBreakdown={scoreBreakdown}
           onOpenEvidence={onOpenEvidence}
         />
       </div>

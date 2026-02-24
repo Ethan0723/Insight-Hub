@@ -28,6 +28,7 @@ function App() {
 
   const [scenario, setScenario] = useState(defaultScenario);
   const [revenueResult, setRevenueResult] = useState(null);
+  const [scoreBreakdown, setScoreBreakdown] = useState(null);
 
   const [favorites, setFavorites] = useState(storage.getFavorites());
   const [readIds, setReadIds] = useState(storage.getReadNewsIds());
@@ -58,15 +59,17 @@ function App() {
       api.getDailyInsight(),
       api.getMatrix(),
       api.getAppMeta(),
-      api.getRevenueImpact(defaultScenario)
+      api.getRevenueImpact(defaultScenario),
+      api.getScoreBreakdown(defaultScenario)
     ])
-      .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes]) => {
+      .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes, scoreRes]) => {
         if (!mounted) return;
         setNewsBase(newsRes.list);
         setInsight(insightRes);
         setMatrix(matrixRes);
         setMeta(metaRes);
         setRevenueResult(revenueRes);
+        setScoreBreakdown(scoreRes);
       })
       .catch(() => {
         if (mounted) setError('初始化数据失败，请刷新重试。');
@@ -82,8 +85,10 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
-    api.getRevenueImpact(scenario).then((res) => {
-      if (mounted) setRevenueResult(res);
+    Promise.all([api.getRevenueImpact(scenario), api.getScoreBreakdown(scenario)]).then(([revenueRes, scoreRes]) => {
+      if (!mounted) return;
+      setRevenueResult(revenueRes);
+      setScoreBreakdown(scoreRes);
     });
     return () => {
       mounted = false;
@@ -212,7 +217,7 @@ function App() {
     );
   }
 
-  if (error || !insight || !revenueResult) {
+  if (error || !insight || !revenueResult || !scoreBreakdown) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
@@ -245,6 +250,7 @@ function App() {
             matrix={matrix}
             explainers={meta.explainers}
             revenueResult={revenueResult}
+            scoreBreakdown={scoreBreakdown}
             revenueScenario={scenario}
             onRevenueScenarioChange={onScenarioChange}
             news={newsBase}

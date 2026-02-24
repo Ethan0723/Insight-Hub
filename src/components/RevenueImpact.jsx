@@ -33,7 +33,7 @@ function TrendChart({ labels, base, adjusted }) {
   );
 }
 
-function RevenueImpact({ scenario, onScenarioChange, result, onOpenEvidence }) {
+function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onOpenEvidence }) {
   const sliders = useMemo(
     () => [
       {
@@ -69,17 +69,48 @@ function RevenueImpact({ scenario, onScenarioChange, result, onOpenEvidence }) {
     return `${rawValue.toFixed(1)}%`;
   };
 
+  const formatDelta = (value) => {
+    if (value > 0) return `+${value}`;
+    return `${value}`;
+  };
+
+  const getFinalById = (id) => {
+    if (!scoreBreakdown) return null;
+    if (id === 'subscription') return scoreBreakdown.final.subscription;
+    if (id === 'commission') return scoreBreakdown.final.commission;
+    if (id === 'payment') return scoreBreakdown.final.payment;
+    if (id === 'ecosystem') return scoreBreakdown.final.ecosystem;
+    return null;
+  };
+
+  const getBaselineById = (id) => {
+    if (!scoreBreakdown) return null;
+    if (id === 'subscription') return scoreBreakdown.baseline.subscription;
+    if (id === 'commission') return scoreBreakdown.baseline.commission;
+    if (id === 'payment') return scoreBreakdown.baseline.payment;
+    if (id === 'ecosystem') return scoreBreakdown.baseline.ecosystem;
+    return null;
+  };
+
   return (
     <section className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
-        <button
-          type="button"
-          onClick={() => onOpenEvidence(result.evidence)}
-          className="rounded-full border border-blue-300/35 bg-blue-300/10 px-3 py-1 text-xs text-blue-200"
-        >
-          数据接口: {result.endpoint} · 查看引用新闻
-        </button>
+        <div className="flex items-center gap-2">
+          <span
+            title="Baseline：外部态势（新闻驱动） | Δ：策略参数变化（沙盘仿真） | Final：Baseline+Δ（用于优先级决策）"
+            className="cursor-help rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-200"
+          >
+            ⓘ 口径说明
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenEvidence(result.evidence)}
+            className="rounded-full border border-blue-300/35 bg-blue-300/10 px-3 py-1 text-xs text-blue-200"
+          >
+            数据接口: {result.endpoint} · 查看引用新闻
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1.1fr]">
@@ -140,12 +171,16 @@ function RevenueImpact({ scenario, onScenarioChange, result, onOpenEvidence }) {
             <div key={item.id} className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-slate-100">{item.name}</p>
-                <span className="text-xs text-cyan-200">评分: {item.score}</span>
+                <span className="text-xs text-cyan-200">Final: {getFinalById(item.id) ?? '-'}</span>
               </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Baseline {getBaselineById(item.id) ?? '-'} / Δ {formatDelta(item.delta)} / Final {getFinalById(item.id) ?? '-'}
+              </p>
               <p className="mt-2 text-xs text-slate-400">影响来源新闻数量: {item.evidence.newsIds.length}</p>
               <p className="mt-2 text-xs leading-5 text-slate-300">敏感度说明: {item.sensitivity}</p>
               <button
                 type="button"
+                title={`Baseline ${getBaselineById(item.id) ?? '-'} / Δ ${formatDelta(item.delta)} / Final ${getFinalById(item.id) ?? '-'}`}
                 onClick={() => onOpenEvidence(item.evidence)}
                 className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
               >

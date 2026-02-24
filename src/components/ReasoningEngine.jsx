@@ -17,14 +17,36 @@ function Sparkline({ points }) {
   );
 }
 
-function ReasoningEngine({ insight, onOpenEvidence }) {
+const dimNameToKey = {
+  订阅: 'subscription',
+  佣金: 'commission',
+  支付: 'payment',
+  生态: 'ecosystem'
+};
+
+function formatDelta(value) {
+  if (value > 0) return `+${value}`;
+  return `${value}`;
+}
+
+function ReasoningEngine({ insight, scoreBreakdown, onOpenEvidence }) {
+  const finalOverall = scoreBreakdown?.final?.overall ?? insight.impactScore;
+
   return (
     <section className="rounded-3xl border border-fuchsia-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">战略影响推理引擎</h2>
-        <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-3 py-1 text-xs text-fuchsia-200">
-          最近更新: {insight.updatedAt}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            title="Baseline：外部态势（新闻驱动） | Δ：策略参数变化（沙盘仿真） | Final：Baseline+Δ（用于优先级决策）"
+            className="cursor-help rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-200"
+          >
+            ⓘ 口径说明
+          </span>
+          <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-3 py-1 text-xs text-fuchsia-200">
+            最近更新: {insight.updatedAt}
+          </span>
+        </div>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
@@ -55,7 +77,11 @@ function ReasoningEngine({ insight, onOpenEvidence }) {
         <div className="space-y-4">
           <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
             <p className="text-xs text-slate-400">影响评分</p>
-            <p className="mt-2 text-4xl font-semibold text-cyan-200">{insight.impactScore}</p>
+            <p className="mt-2 text-4xl font-semibold text-cyan-200">{finalOverall}</p>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Baseline {scoreBreakdown?.baseline?.overall ?? insight.impactScore} / Δ {formatDelta(scoreBreakdown?.delta?.overall ?? 0)} / Final{' '}
+              {finalOverall}
+            </p>
             <p className="mt-2 text-xs text-slate-500">0-100 越高表示对收入模型扰动越大</p>
           </article>
 
@@ -64,15 +90,30 @@ function ReasoningEngine({ insight, onOpenEvidence }) {
             <div className="space-y-2">
               {insight.dimensions.map((item) => (
                 <div key={item.name}>
-                  <div className="mb-1 flex justify-between text-xs text-slate-300">
-                    <span>{item.name}</span>
-                    <button type="button" onClick={() => onOpenEvidence(item.evidence)} className="text-cyan-200 hover:underline">
-                      {item.score} · 证据
-                    </button>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-800">
-                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${item.score}%` }} />
-                  </div>
+                  {(() => {
+                    const key = dimNameToKey[item.name];
+                    const baselineScore = scoreBreakdown?.baseline?.[key] ?? item.score;
+                    const deltaScore = scoreBreakdown?.delta?.[key] ?? 0;
+                    const finalScore = scoreBreakdown?.final?.[key] ?? item.score;
+                    return (
+                      <>
+                        <div className="mb-1 flex justify-between text-xs text-slate-300">
+                          <span>{item.name}</span>
+                          <button
+                            type="button"
+                            title={`Baseline ${baselineScore} / Δ ${formatDelta(deltaScore)} / Final ${finalScore}`}
+                            onClick={() => onOpenEvidence(item.evidence)}
+                            className="text-cyan-200 hover:underline"
+                          >
+                            {finalScore} · 证据
+                          </button>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-800">
+                          <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${finalScore}%` }} />
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

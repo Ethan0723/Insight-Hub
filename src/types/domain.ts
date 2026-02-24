@@ -114,11 +114,36 @@ export interface RevenueImpactResult {
   dimensions: Array<{
     id: string;
     name: string;
-    score: number;
+    delta: number;
     sensitivity: string;
     evidence: EvidenceLink;
   }>;
   evidence: EvidenceLink;
+}
+
+export interface ScoreVector {
+  subscription: number;
+  commission: number;
+  payment: number;
+  ecosystem: number;
+  overall: number;
+}
+
+export interface ScoreBreakdown {
+  baseline: ScoreVector;
+  delta: ScoreVector;
+  final: ScoreVector;
+  explain: {
+    baselineMethod: string;
+    deltaMethod: string;
+    notes: string[];
+  };
+  evidence: {
+    subscription: NewsId[];
+    commission: NewsId[];
+    payment: NewsId[];
+    ecosystem: NewsId[];
+  };
 }
 
 export interface SavedView {
