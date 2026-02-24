@@ -1,100 +1,118 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import MethodPopover from './ui/MethodPopover';
 
-function TrendChart({ labels, base, adjusted }) {
-  const max = Math.max(...base, ...adjusted);
-  const min = Math.min(...base, ...adjusted);
-  const range = max - min || 1;
+const DIMENSIONS = [
+  { id: 'subscription', name: '订阅价格' },
+  { id: 'commission', name: '佣金结构' },
+  { id: 'payment', name: '支付链路' },
+  { id: 'ecosystem', name: '生态扩展' }
+];
 
-  const toPath = (arr) =>
-    arr
-      .map((value, idx) => {
-        const denominator = Math.max(arr.length - 1, 1);
-        const x = (idx / denominator) * 100;
-        const normalized = (value - min) / range;
-        const y = 94 - normalized * 88;
-        return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
-      })
-      .join(' ');
-
-  const visibleEvery = Math.max(1, Math.ceil(labels.length / 10));
-
-  return (
-    <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
-      <svg viewBox="0 0 100 100" className="h-40 w-full">
-        <path d={toPath(base)} fill="none" stroke="rgb(100,116,139)" strokeWidth="2" strokeDasharray="2 2" />
-        <path d={toPath(adjusted)} fill="none" stroke="rgb(34,211,238)" strokeWidth="2.5" />
-      </svg>
-      <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-        {labels.map((label, index) => (
-          <span key={`${label}-${index}`}>{index % visibleEvery === 0 || index === labels.length - 1 ? label : ''}</span>
-        ))}
-      </div>
-      <div className="mt-2 flex items-center gap-3 text-xs">
-        <span className="text-slate-400">灰线: 基线</span>
-        <span className="text-cyan-200">蓝线: 当前参数</span>
-      </div>
-    </div>
-  );
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onOpenEvidence }) {
+function getRiskLevel(finalOverall) {
+  if (finalOverall >= 75) return '高风险';
+  if (finalOverall >= 60) return '中高';
+  if (finalOverall >= 45) return '中性';
+  return '低风险';
+}
+
+function getRiskTone(level) {
+  if (level === '高风险') return 'text-rose-300 border-rose-400/40 bg-rose-400/10';
+  if (level === '中高') return 'text-amber-200 border-amber-300/40 bg-amber-300/10';
+  if (level === '中性') return 'text-sky-200 border-sky-300/40 bg-sky-300/10';
+  return 'text-emerald-200 border-emerald-300/40 bg-emerald-300/10';
+}
+
+function getExposureTone(index) {
+  if (index >= 0.7) return 'text-rose-300';
+  if (index >= 0.4) return 'text-amber-200';
+  return 'text-emerald-200';
+}
+
+function toDimensionScore(scoreBreakdown, id) {
+  if (!scoreBreakdown) return { baseline: 0, delta: 0, final: 0 };
+  return {
+    baseline: scoreBreakdown.baseline[id] ?? 0,
+    delta: scoreBreakdown.delta[id] ?? 0,
+    final: scoreBreakdown.final[id] ?? 0
+  };
+}
+
+function formatDelta(value) {
+  if (value > 0) return `+${value}`;
+  return `${value}`;
+}
+
+function buildRiskSubtitle(insight, topDimensionName) {
+  const policy = insight?.indexes?.find((item) => item.id === 'policy')?.value ?? 0;
+  const payment = insight?.indexes?.find((item) => item.id === 'agent')?.value ?? 0;
+  if (policy >= 70 || payment >= 70) {
+    return `外部支付与政策信号增强，收入结构对${topDimensionName}敏感度上升。`;
+  }
+  return `外部波动中等，当前主要暴露集中在${topDimensionName}，建议优先做参数对冲。`;
+}
+
+function applyScenarioPatch(base, patch) {
+  return {
+    arpuDelta: clamp(base.arpuDelta + (patch.arpuDelta || 0), -10, 10),
+    commissionDelta: clamp(base.commissionDelta + (patch.commissionDelta || 0), -1, 1),
+    paymentSuccessDelta: clamp(base.paymentSuccessDelta + (patch.paymentSuccessDelta || 0), -5, 5)
+  };
+}
+
+function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioApply, result, scoreBreakdown, onOpenEvidence }) {
+  const [expandedId, setExpandedId] = useState('payment');
+
   const sliders = useMemo(
     () => [
-      {
-        key: 'arpuDelta',
-        label: '订阅 ARPU 调整',
-        min: -10,
-        max: 10,
-        step: 0.5,
-        value: scenario.arpuDelta
-      },
-      {
-        key: 'commissionDelta',
-        label: '佣金率调整 (pp)',
-        min: -0.2,
-        max: 0.2,
-        step: 0.01,
-        value: scenario.commissionDelta
-      },
-      {
-        key: 'paymentSuccessDelta',
-        label: '支付成功率调整 (pp)',
-        min: -5,
-        max: 5,
-        step: 0.5,
-        value: scenario.paymentSuccessDelta
-      }
+      { key: 'arpuDelta', label: '订阅 ARPU 调整', min: -10, max: 10, step: 0.5, value: scenario.arpuDelta },
+      { key: 'commissionDelta', label: '佣金率调整 (pp)', min: -1, max: 1, step: 0.05, value: scenario.commissionDelta },
+      { key: 'paymentSuccessDelta', label: '支付成功率调整 (pp)', min: -5, max: 5, step: 0.5, value: scenario.paymentSuccessDelta }
     ],
     [scenario]
   );
 
-  const formatSliderValue = (key, rawValue) => {
-    if (key === 'commissionDelta') return `${rawValue.toFixed(2)}pp`;
-    return `${rawValue.toFixed(1)}%`;
-  };
+  const exposureRows = useMemo(() => {
+    return DIMENSIONS.map((dim) => {
+      const score = toDimensionScore(scoreBreakdown, dim.id);
+      const externalRisk = score.baseline / 100;
+      const internalSensitivity = Math.min(Math.abs(score.delta) / 100, 1);
+      const exposureIndex = (score.baseline * Math.abs(score.delta)) / 10000;
+      const evidenceIds = scoreBreakdown?.evidence?.[dim.id] || [];
+      return {
+        ...dim,
+        ...score,
+        externalRisk,
+        internalSensitivity,
+        exposureIndex,
+        evidenceIds
+      };
+    }).sort((a, b) => b.exposureIndex - a.exposureIndex);
+  }, [scoreBreakdown]);
 
-  const formatDelta = (value) => {
-    if (value > 0) return `+${value}`;
-    return `${value}`;
-  };
+  const currentExpanded = exposureRows.find((item) => item.id === expandedId) || exposureRows[0];
+  const expandedNews = useMemo(() => {
+    if (!currentExpanded) return [];
+    const set = new Set(currentExpanded.evidenceIds);
+    return (news || []).filter((item) => set.has(item.id));
+  }, [currentExpanded, news]);
 
-  const getFinalById = (id) => {
-    if (!scoreBreakdown) return null;
-    if (id === 'subscription') return scoreBreakdown.final.subscription;
-    if (id === 'commission') return scoreBreakdown.final.commission;
-    if (id === 'payment') return scoreBreakdown.final.payment;
-    if (id === 'ecosystem') return scoreBreakdown.final.ecosystem;
-    return null;
-  };
+  const riskLevel = getRiskLevel(scoreBreakdown?.final?.overall ?? 0);
+  const riskSubtitle = buildRiskSubtitle(insight, exposureRows[0]?.name || '支付链路');
 
-  const getBaselineById = (id) => {
-    if (!scoreBreakdown) return null;
-    if (id === 'subscription') return scoreBreakdown.baseline.subscription;
-    if (id === 'commission') return scoreBreakdown.baseline.commission;
-    if (id === 'payment') return scoreBreakdown.baseline.payment;
-    if (id === 'ecosystem') return scoreBreakdown.baseline.ecosystem;
-    return null;
+  const simulationActions = [
+    { label: '优化支付成功率 1pp', patch: { paymentSuccessDelta: 1 } },
+    { label: '上调佣金 0.5pp', patch: { commissionDelta: 0.5 } },
+    { label: '提升 ARPU 3%', patch: { arpuDelta: 3 } },
+    { label: 'AI 功能升级', patch: { arpuDelta: 1.5, paymentSuccessDelta: 0.5, commissionDelta: -0.1 } }
+  ];
+
+  const formatSliderValue = (key, value) => {
+    if (key === 'commissionDelta') return `${value.toFixed(2)}pp`;
+    return `${value.toFixed(1)}%`;
   };
 
   return (
@@ -113,9 +131,9 @@ function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onO
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_1.1fr]">
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
-          <p className="mb-4 text-sm text-slate-300">参数调节</p>
+          <p className="mb-4 text-sm text-slate-300">行动模拟</p>
           <div className="space-y-4">
             {sliders.map((item) => (
               <div key={item.key}>
@@ -133,6 +151,19 @@ function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onO
                   className="w-full accent-cyan-400"
                 />
               </div>
+            ))}
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {simulationActions.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => onScenarioApply(applyScenarioPatch(scenario, item.patch))}
+                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+              >
+                {item.label}
+              </button>
             ))}
           </div>
 
@@ -156,40 +187,127 @@ function RevenueImpact({ scenario, onScenarioChange, result, scoreBreakdown, onO
           </div>
         </article>
 
-        <article className="space-y-4">
-          <TrendChart labels={result.labels} base={result.baseTrend} adjusted={result.adjustedTrend} />
-          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-200">
-            {result.explanation}
+        <article className="rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-4">
+          <p className="mb-3 text-sm font-medium text-cyan-200">Strategic Dashboard Panel</p>
+
+          <div className={`rounded-xl border px-4 py-3 ${getRiskTone(riskLevel)}`}>
+            <p className="text-xs">当前战略风险等级</p>
+            <p className="mt-1 text-2xl font-semibold">{riskLevel}</p>
+            <p className="mt-2 text-xs opacity-90">{riskSubtitle}</p>
+            <p className="mt-2 text-[11px] opacity-80">
+              Final {scoreBreakdown?.final?.overall ?? 0}（Baseline {scoreBreakdown?.baseline?.overall ?? 0} / Δ{' '}
+              {formatDelta(scoreBreakdown?.delta?.overall ?? 0)}）
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+            <p className="mb-2 text-sm text-slate-200">收入结构暴露矩阵</p>
+            <div className="grid grid-cols-[1.1fr_1fr_1fr_1fr] gap-2 text-[11px] text-slate-400">
+              <span>维度</span>
+              <span>外部风险</span>
+              <span>内部敏感度</span>
+              <span>综合暴露</span>
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {exposureRows.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setExpandedId(row.id)}
+                  className={`grid w-full grid-cols-[1.1fr_1fr_1fr_1fr] items-center gap-2 rounded-lg border px-2 py-2 text-left text-xs ${
+                    expandedId === row.id ? 'border-cyan-300/40 bg-cyan-400/5' : 'border-slate-700 bg-slate-900/50'
+                  }`}
+                  title={`Baseline ${row.baseline} / Δ ${formatDelta(row.delta)} / Final ${row.final}`}
+                >
+                  <span className="text-slate-200">{row.name}</span>
+                  <span className="text-slate-300">{row.externalRisk.toFixed(2)}</span>
+                  <span className="text-slate-300">{row.internalSensitivity.toFixed(2)}</span>
+                  <span className={getExposureTone(row.exposureIndex)}>{row.exposureIndex.toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+            <p className="mb-2 text-sm text-slate-200">战略优先级排序</p>
+            <div className="space-y-1.5 text-xs">
+              {exposureRows.map((row, index) => (
+                <div key={row.id} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1.5">
+                  <span className="text-slate-100">
+                    <span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-cyan-200">P{index}</span>
+                    {row.name}
+                  </span>
+                  <span className={getExposureTone(row.exposureIndex)}>{row.exposureIndex.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </article>
       </div>
 
-      <article className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-4">
-        <p className="mb-3 text-sm font-medium text-cyan-200">收入影响解释面板</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          {result.dimensions.map((item) => (
-            <div key={item.id} className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-slate-100">{item.name}</p>
-                <span className="text-xs text-cyan-200">Final: {getFinalById(item.id) ?? '-'}</span>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-400">
-                Baseline {getBaselineById(item.id) ?? '-'} / Δ {formatDelta(item.delta)} / Final {getFinalById(item.id) ?? '-'}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">影响来源新闻数量: {item.evidence.newsIds.length}</p>
-              <p className="mt-2 text-xs leading-5 text-slate-300">敏感度说明: {item.sensitivity}</p>
+      {currentExpanded ? (
+        <article className="mt-5 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+          <p className="text-sm font-medium text-cyan-200">可解释因果链：{currentExpanded.name}</p>
+          <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-5">
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
+              <p className="text-slate-400">政策/新闻信号数量</p>
+              <p className="mt-1">{currentExpanded.evidenceIds.length}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
+              <p className="text-slate-400">Baseline</p>
+              <p className="mt-1">{currentExpanded.baseline}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
+              <p className="text-slate-400">内部敏感度</p>
+              <p className="mt-1">{currentExpanded.internalSensitivity.toFixed(2)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
+              <p className="text-slate-400">Δ 影响</p>
+              <p className="mt-1">{formatDelta(currentExpanded.delta)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
+              <p className="text-slate-400">Final</p>
+              <p className="mt-1">{currentExpanded.final}</p>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-slate-700 bg-slate-900/50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs text-slate-300">引用新闻</p>
               <button
                 type="button"
-                title={`Baseline ${getBaselineById(item.id) ?? '-'} / Δ ${formatDelta(item.delta)} / Final ${getFinalById(item.id) ?? '-'}`}
-                onClick={() => onOpenEvidence(item.evidence)}
-                className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+                onClick={() =>
+                  onOpenEvidence({
+                    id: `ev-chain-${currentExpanded.id}`,
+                    title: `${currentExpanded.name} 因果链引用`,
+                    newsIds: currentExpanded.evidenceIds
+                  })
+                }
+                className="text-xs text-cyan-200 hover:underline"
               >
-                点击查看来源新闻
+                查看全部证据
               </button>
             </div>
-          ))}
-        </div>
-      </article>
+            <div className="space-y-2">
+              {expandedNews.slice(0, 6).map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-2">
+                  <p className="text-xs text-slate-100">{item.title}</p>
+                  <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">{item.aiTldr}</p>
+                  <a
+                    href={item.originalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block text-[11px] text-cyan-200 hover:underline"
+                  >
+                    打开原文
+                  </a>
+                </div>
+              ))}
+              {expandedNews.length === 0 ? <p className="text-xs text-slate-500">暂无引用新闻</p> : null}
+            </div>
+          </div>
+        </article>
+      ) : null}
     </section>
   );
 }

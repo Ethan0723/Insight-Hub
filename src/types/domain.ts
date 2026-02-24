@@ -100,9 +100,6 @@ export interface RevenueScenario {
 
 export interface RevenueImpactResult {
   endpoint: string;
-  baseTrend: number[];
-  adjustedTrend: number[];
-  labels: string[];
   outputs: {
     gmv: string;
     subscription: string;

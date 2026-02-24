@@ -708,7 +708,7 @@ export const api = {
   async getRevenueImpact(scenario: RevenueScenario): Promise<RevenueImpactResult> {
     await delay(160);
     const news = await getRealOrMockNews();
-    const result = calculateRevenueImpact(scenario, news);
+    const result = calculateRevenueImpact(scenario);
     return enrichRevenueWithEvidence(result, news);
   },
 

@@ -13,6 +13,7 @@ function DashboardPage({
   scoreBreakdown,
   revenueScenario,
   onRevenueScenarioChange,
+  onRevenueScenarioApply,
   news,
   favorites,
   readIds,
@@ -33,8 +34,11 @@ function DashboardPage({
 
       <div id="revenue">
         <RevenueImpact
+          insight={insight}
+          news={news}
           scenario={revenueScenario}
           onScenarioChange={onRevenueScenarioChange}
+          onScenarioApply={onRevenueScenarioApply}
           result={revenueResult}
           scoreBreakdown={scoreBreakdown}
           onOpenEvidence={onOpenEvidence}

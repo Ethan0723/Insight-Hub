@@ -202,6 +202,10 @@ function App() {
     setScenario((prev) => ({ ...prev, [key]: value }));
   };
 
+  const onScenarioApply = (patch) => {
+    setScenario((prev) => ({ ...prev, ...patch }));
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -253,6 +257,7 @@ function App() {
             scoreBreakdown={scoreBreakdown}
             revenueScenario={scenario}
             onRevenueScenarioChange={onScenarioChange}
+            onRevenueScenarioApply={onScenarioApply}
             news={newsBase}
             favorites={favorites}
             readIds={readIds}
