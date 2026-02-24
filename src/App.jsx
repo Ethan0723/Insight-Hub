@@ -299,7 +299,16 @@ function App() {
         </button>
       ) : null}
 
-      <AIAssistantPanel data={meta.assistant} open={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
+      <AIAssistantPanel
+        data={meta.assistant}
+        open={aiPanelOpen}
+        onClose={() => setAiPanelOpen(false)}
+        insight={insight}
+        scoreBreakdown={scoreBreakdown}
+        revenueResult={revenueResult}
+        news={newsBase}
+        onOpenEvidence={onOpenEvidence}
+      />
 
       <EvidenceDrawer
         open={evidenceOpen}
