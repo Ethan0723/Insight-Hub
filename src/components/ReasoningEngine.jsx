@@ -6,7 +6,8 @@ function Sparkline({ points }) {
   const range = max - min || 1;
   const d = points
     .map((value, idx) => {
-      const x = (idx / (points.length - 1)) * 100;
+      const denominator = Math.max(points.length - 1, 1);
+      const x = (idx / denominator) * 100;
       const y = 100 - ((value - min) / range) * 100;
       return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
     })

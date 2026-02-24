@@ -402,6 +402,30 @@ function trendFromScore(score: number, bias = 0): number[] {
   return Array.from({ length: 7 }, (_, i) => Math.round(start + i * 1.8));
 }
 
+function buildTrendFromNews(news: NewsItem[], newsIds: NewsId[], fallbackScore: number, bias = 0): number[] {
+  if (!newsIds.length) return trendFromScore(fallbackScore, bias);
+
+  const targetSet = new Set(newsIds);
+  const rows = news.filter((item) => targetSet.has(item.id));
+  const byDay = new Map<string, number[]>();
+
+  rows.forEach((item) => {
+    const day = String(item.publishDate || '').slice(0, 10);
+    if (!day) return;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)?.push(item.impactScore);
+  });
+
+  const days = Array.from(byDay.keys()).sort();
+  if (days.length < 2) return trendFromScore(fallbackScore, bias);
+
+  return days.map((day, index) => {
+    const list = byDay.get(day) || [];
+    const avg = list.length ? list.reduce((sum, v) => sum + v, 0) / list.length : fallbackScore;
+    return Math.max(30, Math.min(98, Math.round(avg + bias + index * 0.5)));
+  });
+}
+
 function buildDailyInsight(news: NewsItem[]): DailyInsight {
   if (news.length === 0) return mockDailyInsight;
 
@@ -471,28 +495,28 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
         id: 'r1',
         text: '政策/平台规则变化',
         explain: '监管与平台规则变化直接影响商家经营约束。',
-        trend7d: trendFromScore(policy, -4),
+        trend7d: buildTrendFromNews(news, policyIds, policy, -4),
         evidence: { id: 'ev-r1', title: '推理节点1引用', newsIds: policyIds }
       },
       {
         id: 'r2',
         text: '获客与运营效率波动',
         explain: '投放、履约和客服效率影响 ROI。',
-        trend7d: trendFromScore(compete, -2),
+        trend7d: buildTrendFromNews(news, competeIds, compete, -2),
         evidence: { id: 'ev-r2', title: '推理节点2引用', newsIds: competeIds }
       },
       {
         id: 'r3',
         text: 'GMV 增速变化',
         explain: 'ROI 与供给能力变化传导到成交增长。',
-        trend7d: trendFromScore(growth, 0),
+        trend7d: buildTrendFromNews(news, revenueIds, growth, 0),
         evidence: { id: 'ev-r3', title: '推理节点3引用', newsIds: revenueIds }
       },
       {
         id: 'r4',
         text: 'SaaS 收入结构影响',
         explain: '最终反映到订阅、佣金、支付与生态收益。',
-        trend7d: trendFromScore(stable, 1),
+        trend7d: buildTrendFromNews(news, [...new Set([...revenueIds, ...paymentIds])], stable, 1),
         evidence: { id: 'ev-r4', title: '推理节点4引用', newsIds: [...new Set([...revenueIds, ...paymentIds])] }
       }
     ],
@@ -683,8 +707,9 @@ export const api = {
 
   async getRevenueImpact(scenario: RevenueScenario): Promise<RevenueImpactResult> {
     await delay(160);
-    const result = calculateRevenueImpact(scenario);
-    return enrichRevenueWithEvidence(result, await getRealOrMockNews());
+    const news = await getRealOrMockNews();
+    const result = calculateRevenueImpact(scenario, news);
+    return enrichRevenueWithEvidence(result, news);
   },
 
   async getScoreBreakdown(scenario: RevenueScenario): Promise<ScoreBreakdown> {

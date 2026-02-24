@@ -9,11 +9,14 @@ function TrendChart({ labels, base, adjusted }) {
   const toPath = (arr) =>
     arr
       .map((value, idx) => {
-        const x = (idx / (arr.length - 1)) * 100;
+        const denominator = Math.max(arr.length - 1, 1);
+        const x = (idx / denominator) * 100;
         const y = 100 - ((value - min) / range) * 100;
         return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
       })
       .join(' ');
+
+  const visibleEvery = Math.max(1, Math.ceil(labels.length / 10));
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
@@ -22,8 +25,8 @@ function TrendChart({ labels, base, adjusted }) {
         <path d={toPath(adjusted)} fill="none" stroke="rgb(34,211,238)" strokeWidth="2.5" />
       </svg>
       <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-        {labels.map((label) => (
-          <span key={label}>{label}</span>
+        {labels.map((label, index) => (
+          <span key={`${label}-${index}`}>{index % visibleEvery === 0 || index === labels.length - 1 ? label : ''}</span>
         ))}
       </div>
       <div className="mt-2 flex items-center gap-3 text-xs">
