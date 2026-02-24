@@ -11,7 +11,8 @@ function TrendChart({ labels, base, adjusted }) {
       .map((value, idx) => {
         const denominator = Math.max(arr.length - 1, 1);
         const x = (idx / denominator) * 100;
-        const y = 100 - ((value - min) / range) * 100;
+        const normalized = (value - min) / range;
+        const y = 94 - normalized * 88;
         return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
       })
       .join(' ');
