@@ -1,5 +1,42 @@
+import { useEffect, useState } from 'react';
+import { streamNewsSummary } from '../../services/ai';
+
 function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibraryByIds }) {
+  const [summary, setSummary] = useState('');
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setSummary('');
+      setLoadingSummary(false);
+      setSummaryError('');
+    }
+  }, [open]);
+
   if (!open) return null;
+
+  const onGenerateSummary = async () => {
+    if (!newsList.length || loadingSummary) return;
+    setSummary('');
+    setSummaryError('');
+    setLoadingSummary(true);
+
+    try {
+      await streamNewsSummary(
+        newsList.map((item) => item.title).slice(0, 12),
+        {
+          onToken: (token) => {
+            setSummary((prev) => `${prev}${token}`);
+          }
+        }
+      );
+    } catch (error) {
+      setSummaryError('AI 摘要生成失败，请稍后重试。');
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50">
@@ -19,7 +56,7 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
           </button>
         </div>
 
-        <div className="mb-4">
+        <div className="mb-4 flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => onOpenLibraryByIds(newsList.map((item) => item.id))}
@@ -27,7 +64,23 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
           >
             在新闻库中查看这些引用新闻
           </button>
+          <button
+            type="button"
+            onClick={onGenerateSummary}
+            disabled={!newsList.length || loadingSummary}
+            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loadingSummary ? '生成中...' : '生成 AI 摘要'}
+          </button>
         </div>
+
+        {summary || summaryError ? (
+          <div className="mb-4 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-3">
+            <p className="mb-2 text-xs text-cyan-200">AI 聚合摘要</p>
+            {summary ? <p className="text-sm leading-6 text-slate-100">{summary}</p> : null}
+            {summaryError ? <p className="text-xs text-rose-300">{summaryError}</p> : null}
+          </div>
+        ) : null}
 
         <div className="space-y-3">
           {newsList.length === 0 ? (
