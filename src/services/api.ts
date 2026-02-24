@@ -212,7 +212,17 @@ function isClearlyIrrelevant(item: NewsItem): boolean {
   ];
   const hasIrrelevant = irrelevantSignals.some((s) => text.includes(s));
   const hasEcommerce = ecommerceSignals.some((s) => text.includes(s));
-  const tooLowConfidence = item.impactScore <= 10 && item.aiTldr.includes('信息不足');
+  const lowConfidenceSignals = [
+    '信息不足',
+    '判断置信度较低',
+    '模型未返回合法 json',
+    '待翻译',
+    'low confidence'
+  ];
+  const hasLowConfidenceSignal = lowConfidenceSignals.some((s) =>
+    `${item.title} ${item.aiTldr} ${item.summary}`.toLowerCase().includes(s.toLowerCase())
+  );
+  const tooLowConfidence = hasLowConfidenceSignal || (item.impactScore <= 25 && item.riskLevel === '低');
   return (hasIrrelevant && !hasEcommerce) || tooLowConfidence;
 }
 
