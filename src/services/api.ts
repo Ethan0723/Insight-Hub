@@ -71,6 +71,16 @@ function isNegatedShopifyTitle(title: string): boolean {
   );
 }
 
+function isShopifyFalsePositive(item: NewsItem): boolean {
+  const text = `${item.title} ${item.aiTldr} ${item.summary}`.toLowerCase();
+  const hasShopify = text.includes('shopify');
+  const hasWoo = text.includes('woocommerce') || text.includes('woo commerce');
+  const hasNegative = /(instead of|rather than|not|without|vs|versus|而非|不是|并非|转向|放弃|没有选择)/.test(
+    `${item.title} ${item.aiTldr} ${item.summary}`
+  );
+  return hasShopify && hasWoo && hasNegative;
+}
+
 function inferModuleTags(text: string): string[] {
   const t = text.toLowerCase();
   const tags: string[] = [];
@@ -507,7 +517,10 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
   const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
 
   return targetPlatforms.map((platform) => {
-    const rows = news.filter((item) => item.platform === platform).slice(0, 4);
+    const rows = news
+      .filter((item) => item.platform === platform)
+      .filter((item) => (platform === 'Shopify' ? !isShopifyFalsePositive(item) : true))
+      .slice(0, 4);
     const first = rows[0];
     const fallback = `暂无 ${platform} 最新事件，建议继续追踪。`;
     const evidenceIds = rows.map((item) => item.id);
