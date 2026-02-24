@@ -23,6 +23,7 @@ RUN_BACKFILL = False
 # RUN_BACKFILL = True
 RUN_TITLE_ZH_BACKFILL = False
 RUN_CLEANUP = False
+FORCE_FULL_FETCH_FROM_DEFAULT_START = False
 CLEANUP_DRY_RUN = True
 CLEANUP_SCAN_LIMIT = 5000
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -34,6 +35,9 @@ def _get_incremental_start_time() -> datetime:
 
     Uses latest publish_time in DB minus 1 hour buffer to avoid missing late/updated feeds.
     """
+    if FORCE_FULL_FETCH_FROM_DEFAULT_START:
+        return DEFAULT_START
+
     latest = get_latest_publish_time()
     if not latest:
         return DEFAULT_START
@@ -153,7 +157,10 @@ def main() -> None:
         return
 
     incremental_start = _get_incremental_start_time()
-    print(f"[RUN] Incremental fetch since: {incremental_start.isoformat()}")
+    if FORCE_FULL_FETCH_FROM_DEFAULT_START:
+        print(f"[RUN] Full fetch mode enabled, start since: {incremental_start.isoformat()}")
+    else:
+        print(f"[RUN] Incremental fetch since: {incremental_start.isoformat()}")
 
     print("Fetching RSS...")
     items = fetch_rss_items(min_publish_time=incremental_start)
