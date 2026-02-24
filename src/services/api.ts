@@ -56,10 +56,18 @@ function inferPlatform(title: string, source = '', originalUrl = ''): string {
 
 function isNegatedShopifyTitle(title: string): boolean {
   const t = title.toLowerCase();
+  const hasWooCommerceContrast =
+    /(woocommerce|woo commerce)/.test(t) &&
+    /shopify/.test(t) &&
+    /(instead of|rather than|not|without|vs|versus|而非|不是|并非|转向|放弃|没有选择)/.test(title);
   return (
+    hasWooCommerceContrast ||
     /(not|without|instead of|vs|leave|left)\s+shopify/.test(t) ||
     /shopify\s+(not|without|instead of|vs)/.test(t) ||
-    /没有(选择|采用)?\s*shopify/.test(title)
+    /没有(选择|采用)?\s*shopify/i.test(title) ||
+    /而非.{0,10}shopify/i.test(title) ||
+    /(不是|并非).{0,10}shopify/i.test(title) ||
+    /放弃.{0,10}shopify/i.test(title)
   );
 }
 
