@@ -1,0 +1,53 @@
+name: News Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC+8 00:00, 06:00, 12:00, 18:00
+    # UTC      16:00, 22:00, 04:00, 10:00
+    - cron: '0 16,22,4,10 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || vars.SUPABASE_SERVICE_ROLE_KEY }}
+      LLM_API_URL: ${{ secrets.LLM_API_URL || vars.LLM_API_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY || vars.LLM_API_KEY }}
+      GOOGLE_WINDOW_DAYS: ${{ secrets.GOOGLE_WINDOW_DAYS || vars.GOOGLE_WINDOW_DAYS || '7' }}
+      MAX_GOOGLE_WINDOWS: ${{ secrets.MAX_GOOGLE_WINDOWS || vars.MAX_GOOGLE_WINDOWS || '24' }}
+      MAX_ENTRIES_PER_FEED: ${{ secrets.MAX_ENTRIES_PER_FEED || vars.MAX_ENTRIES_PER_FEED || '90' }}
+      ENABLE_SUMMARY: ${{ secrets.ENABLE_SUMMARY || vars.ENABLE_SUMMARY || 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate required secrets
+        run: |
+          [ -n "$SUPABASE_URL" ] || (echo "Missing SUPABASE_URL" && exit 1)
+          [ -n "$SUPABASE_SERVICE_ROLE_KEY" ] || (echo "Missing SUPABASE_SERVICE_ROLE_KEY" && exit 1)
+          [ -n "$LLM_API_URL" ] || (echo "Missing LLM_API_URL" && exit 1)
+          [ -n "$LLM_API_KEY" ] || (echo "Missing LLM_API_KEY" && exit 1)
+
+      - name: Run news pipeline
+        run: python -m news_pipeline.main
