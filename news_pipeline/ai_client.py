@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import requests
@@ -25,8 +26,8 @@ LLM_API_URL = os.getenv(
 LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", ""))
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()  # auto | compatible | zhipu
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "500"))
-LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "12000"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "900"))
+LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "8000"))
 LLM_EMPTY_TEXT_FALLBACK = "模型没有生成有效文本，请检查模型配置或进一步降温度/增加 max_tokens。"
 
 MODEL_PROVIDER_MAP = {
@@ -305,6 +306,107 @@ def _prepare_content(content: str) -> str:
     return normalized[:LLM_MAX_INPUT_CHARS]
 
 
+def _build_request_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _request_llm_text(
+    *,
+    endpoint: str,
+    provider: str,
+    model: str,
+    api_key: str,
+    prompt: str,
+    temperature: float,
+    max_tokens: int,
+    timeout: int = 60,
+) -> tuple[str, dict[str, Any]]:
+    headers = _build_request_headers(api_key)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+    response = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
+    if response.status_code >= 400:
+        body_preview = (response.text or "").strip().replace("\n", " ")[:600]
+        raise requests.HTTPError(
+            f"{response.status_code} Client Error for url: {endpoint} | body={body_preview}"
+        )
+
+    raw = response.json()
+    normalized = map_llm_response(raw, provider=provider, model=model)
+    return normalized["text"], normalized
+
+
+def _try_extract_json(text: str) -> dict[str, Any] | None:
+    """Try extracting the first JSON-like object from text."""
+    if not text:
+        return None
+    matches = re.findall(r"\{.*?\}", text, flags=re.S)
+    for candidate in matches:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _repair_json_via_llm(
+    *,
+    broken_text: str,
+    title: str,
+    endpoint: str,
+    provider: str,
+    model: str,
+    api_key: str,
+) -> dict[str, Any]:
+    """Use a second lightweight LLM call to repair invalid JSON output."""
+    repair_prompt = (
+        "下面文本不是合法 JSON。请转换为严格合法 JSON。"
+        "不要 Markdown，不要代码块，不要解释，只输出 JSON 对象。\n\n"
+        f"标题：{title}\n"
+        "待修复文本：\n"
+        f"{broken_text}"
+    )
+
+    try:
+        repaired_text, _ = _request_llm_text(
+            endpoint=endpoint,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            prompt=repair_prompt,
+            temperature=0.0,
+            max_tokens=600,
+            timeout=60,
+        )
+    except Exception:
+        return _default_payload("JSON 修复失败")
+
+    clean_repaired = _strip_code_fence(repaired_text)
+    try:
+        repaired_json = json.loads(clean_repaired)
+        if isinstance(repaired_json, dict):
+            return repaired_json
+    except Exception:
+        pass
+
+    extracted = _try_extract_json(clean_repaired)
+    if extracted is not None:
+        return extracted
+    return _default_payload("JSON 修复失败")
+
+
 def generate_summary(title: str, content: str) -> dict[str, Any]:
     """Call configured LLM endpoint and return normalized structured JSON summary."""
 
@@ -320,38 +422,49 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
     # accidental placeholder parsing for fields like "tldr".
     prompt = PROMPT_TEMPLATE.replace("{title}", title or "").replace("{content}", prepared_content)
 
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": LLM_MAX_TOKENS,
-        "stream": False,
-    }
-
-    response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
-    if response.status_code >= 400:
-        body_preview = (response.text or "").strip().replace("\n", " ")[:600]
-        raise requests.HTTPError(
-            f"{response.status_code} Client Error for url: {endpoint} | body={body_preview}"
-        )
-
-    normalized = map_llm_response(response.json(), provider=provider, model=model)
-    text = normalized["text"]
+    text, _ = _request_llm_text(
+        endpoint=endpoint,
+        provider=provider,
+        model=model,
+        api_key=LLM_API_KEY,
+        prompt=prompt,
+        temperature=0.1,
+        max_tokens=LLM_MAX_TOKENS,
+        timeout=60,
+    )
     if text == LLM_EMPTY_TEXT_FALLBACK:
         return _default_payload("模型没有返回有效文本")
 
     clean_text = _strip_code_fence(text)
+    raw_json: dict[str, Any] | None = None
 
     try:
-        raw_json = json.loads(clean_text)
-        if not isinstance(raw_json, dict):
-            raise ValueError("Model output is not a JSON object")
+        parsed = json.loads(clean_text)
+        if isinstance(parsed, dict):
+            raw_json = parsed
     except Exception:
+        raw_json = None
+
+    if raw_json is None:
+        print("[LLM-WARN] direct JSON parse failed, trying extract-first-object fallback.")
+        raw_json = _try_extract_json(clean_text)
+
+    if raw_json is None:
+        print("[LLM-WARN] JSON extraction failed, trying LLM repair pass.")
+        repaired = _repair_json_via_llm(
+            broken_text=clean_text,
+            title=title,
+            endpoint=endpoint,
+            provider=provider,
+            model=model,
+            api_key=LLM_API_KEY,
+        )
+        if isinstance(repaired, dict) and "tldr" in repaired:
+            raw_json = repaired
+        elif isinstance(repaired, dict):
+            raw_json = repaired
+
+    if not isinstance(raw_json, dict):
         return _default_payload("模型未返回合法 JSON")
 
     return _normalize_payload(raw_json, title, content)
