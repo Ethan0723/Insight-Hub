@@ -37,3 +37,4 @@
 3. 在 `.env` 中配置：
    - `LLM_API_KEY=...`
    - 可选：`LLM_API_URL`、`LLM_MODEL`
+   - 可选：`VITE_GA_ID=G-XXXXXXXXXX`
