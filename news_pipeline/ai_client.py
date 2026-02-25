@@ -27,6 +27,16 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()  # auto | compa
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "500"))
 LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "12000"))
+LLM_EMPTY_TEXT_FALLBACK = "模型没有生成有效文本，请检查模型配置或进一步降温度/增加 max_tokens。"
+
+MODEL_PROVIDER_MAP = {
+    "glm-4.5-air": "glm",
+    "glm-4.5": "glm",
+    "glm-4-flash": "glm",
+    "bedrock-claude-4-5-sonnet": "anthropic",
+    "claude-4-5-sonnet": "anthropic",
+    "gpt-4o-mini": "openai",
+}
 
 PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分析师。
 
@@ -79,22 +89,80 @@ _ALLOWED_PRIORITY = {"P0", "P1", "P2"}
 _ALLOWED_OWNER = {"产品", "战略", "商业化"}
 
 
-def _extract_response_text(data: dict[str, Any]) -> str:
-    choices = data.get("choices", [])
-    if not choices:
-        raise ValueError("LLM API returned no choices.")
+def _extract_text_value(value: Any) -> str:
+    """Extract a normalized text from model field values."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for block in value:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            elif isinstance(block, str) and block.strip():
+                parts.append(block.strip())
+        return "\n".join(parts).strip()
+    return ""
 
-    message = choices[0].get("message", {})
-    content = message.get("content", "")
 
-    if isinstance(content, list):
-        content = "\n".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+def parse_llm_response(resp: dict[str, Any]) -> str:
+    """Parse raw model response into text.
 
-    text = str(content).strip()
+    Priority:
+    1) message.content
+    2) message.reasoning_content
+    3) message.text
+    4) message.raw_text / message.generated_text
+    """
+    first_choice = (resp.get("choices") or [{}])[0]
+    message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+
+    for key in ("content", "reasoning_content", "text", "raw_text", "generated_text"):
+        parsed = _extract_text_value(message.get(key))
+        if parsed:
+            return parsed
+    return ""
+
+
+def _resolve_provider_name(provider: str, model: str) -> str:
+    if provider == "zhipu":
+        return "glm"
+    if provider == "compatible":
+        return MODEL_PROVIDER_MAP.get(model, "openai-compatible")
+    return MODEL_PROVIDER_MAP.get(model, "unknown")
+
+
+def map_llm_response(resp: dict[str, Any], provider: str, model: str) -> dict[str, Any]:
+    """Normalize provider responses to a unified structure for upper layers.
+
+    Returns:
+        {
+          "text": str,
+          "raw_response": dict,
+          "provider": str,
+          "usage": dict,
+          "finish_reason": str | None,
+        }
+    """
+    first_choice = (resp.get("choices") or [{}])[0]
+    finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
+    usage = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
+
+    text = parse_llm_response(resp)
     if not text:
-        raise ValueError("LLM API returned empty content.")
+        text = LLM_EMPTY_TEXT_FALLBACK
 
-    return text
+    if finish_reason == "length":
+        print("[LLM-WARN] finish_reason=length, output may be truncated.")
+
+    return {
+        "text": text,
+        "raw_response": resp,
+        "provider": _resolve_provider_name(provider, model),
+        "usage": usage,
+        "finish_reason": finish_reason,
+    }
 
 
 def _detect_provider(url: str) -> str:
@@ -272,7 +340,11 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
             f"{response.status_code} Client Error for url: {endpoint} | body={body_preview}"
         )
 
-    text = _extract_response_text(response.json())
+    normalized = map_llm_response(response.json(), provider=provider, model=model)
+    text = normalized["text"]
+    if text == LLM_EMPTY_TEXT_FALLBACK:
+        return _default_payload("模型没有返回有效文本")
+
     clean_text = _strip_code_fence(text)
 
     try:
