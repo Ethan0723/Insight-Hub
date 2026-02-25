@@ -176,11 +176,13 @@ function App() {
 
   const onNavigate = (key) => {
     setActiveNav(key);
-    if (key !== 'library') {
-      setTimeout(() => {
-        document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 10);
-    }
+    setTimeout(() => {
+      if (key === 'library') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 10);
   };
 
   const onOpenEvidence = (evidence) => {
