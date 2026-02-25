@@ -1,9 +1,9 @@
 const menus = [
   { key: 'overview', label: '战略总览' },
-  { key: 'reasoning', label: '推理引擎' },
-  { key: 'revenue', label: '收入影响' },
-  { key: 'feed', label: '情报输入层' },
-  { key: 'matrix', label: '竞争矩阵' },
+  { key: 'revenue', label: '收入影响沙盘' },
+  { key: 'reasoning', label: '外部信号引擎' },
+  { key: 'feed', label: '战略输入情报流' },
+  { key: 'matrix', label: '竞争动态矩阵' },
   { key: 'library', label: '新闻库' }
 ];
 
