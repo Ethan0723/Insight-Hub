@@ -24,10 +24,15 @@
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `LLM_API_URL`
 - `LLM_API_KEY`
+- （可选）`LLM_PROVIDER=auto|compatible|zhipu`
+- （可选）`LLM_MODEL`（按提供商切换）
 
 说明：
 - Python pipeline 与 Node AI 服务统一使用 `LLM_API_URL` / `LLM_API_KEY`。
 - 代码层已兼容旧变量名 `CLAUDE_API_URL` / `CLAUDE_API_KEY`，但建议迁移后删除旧变量。
+- 已兼容两类 LLM 接口：
+  - `compatible`：OpenAI 兼容 chat/completions（如 LiteLLM 代理）
+  - `zhipu`：BigModel 平台（如 `https://open.bigmodel.cn/api/paas/v4/chat/completions`）
 
 ## 本地运行
 

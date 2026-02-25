@@ -1,4 +1,9 @@
-"""Claude API client for structured JSON summary generation."""
+"""LLM client for structured JSON summary generation.
+
+Compatible with:
+- OpenAI-compatible chat completions endpoints (e.g. LiteLLM proxy)
+- Zhipu BigModel chat completions endpoint
+"""
 
 from __future__ import annotations
 
@@ -11,9 +16,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-LLM_API_URL = os.getenv("LLM_API_URL", os.getenv("CLAUDE_API_URL", "https://litellm.shoplazza.site/chat/completions"))
+# Backward compatibility:
+# - New unified vars: LLM_API_URL / LLM_API_KEY
+# - Legacy vars: CLAUDE_API_URL / CLAUDE_API_KEY
+LLM_API_URL = os.getenv(
+    "LLM_API_URL", os.getenv("CLAUDE_API_URL", "https://litellm.shoplazza.site/chat/completions")
+)
 LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", ""))
-MODEL = "bedrock-claude-4-5-sonnet"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()  # auto | compatible | zhipu
+LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "500"))
+LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "12000"))
 
 PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分析师。
 
@@ -66,11 +79,10 @@ _ALLOWED_PRIORITY = {"P0", "P1", "P2"}
 _ALLOWED_OWNER = {"产品", "战略", "商业化"}
 
 
-
 def _extract_response_text(data: dict[str, Any]) -> str:
     choices = data.get("choices", [])
     if not choices:
-        raise ValueError("Claude API returned no choices.")
+        raise ValueError("LLM API returned no choices.")
 
     message = choices[0].get("message", {})
     content = message.get("content", "")
@@ -80,10 +92,43 @@ def _extract_response_text(data: dict[str, Any]) -> str:
 
     text = str(content).strip()
     if not text:
-        raise ValueError("Claude API returned empty content.")
+        raise ValueError("LLM API returned empty content.")
 
     return text
 
+
+def _detect_provider(url: str) -> str:
+    if LLM_PROVIDER in {"compatible", "zhipu"}:
+        return LLM_PROVIDER
+    if "bigmodel.cn" in (url or ""):
+        return "zhipu"
+    return "compatible"
+
+
+def _resolve_endpoint(url: str, provider: str) -> str:
+    raw = (url or "").strip()
+    if provider == "zhipu":
+        if not raw:
+            return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        if raw.endswith("/chat/completions"):
+            return raw
+        if raw.endswith("/v4"):
+            return f"{raw}/chat/completions"
+        if raw.endswith("/v4/"):
+            return f"{raw}chat/completions"
+        return raw
+
+    if not raw:
+        return "https://litellm.shoplazza.site/chat/completions"
+    return raw
+
+
+def _resolve_model(provider: str) -> str:
+    if LLM_MODEL:
+        return LLM_MODEL
+    if provider == "zhipu":
+        return "glm-4.5"
+    return "bedrock-claude-4-5-sonnet"
 
 
 def _strip_code_fence(text: str) -> str:
@@ -93,7 +138,6 @@ def _strip_code_fence(text: str) -> str:
         if stripped.lower().startswith("json"):
             stripped = stripped[4:]
     return stripped.strip()
-
 
 
 def _default_payload(reason: str) -> dict[str, Any]:
@@ -115,7 +159,6 @@ def _default_payload(reason: str) -> dict[str, Any]:
         ],
         "tags": ["信息不足"],
     }
-
 
 
 def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dict[str, Any]:
@@ -186,31 +229,48 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
     return result
 
 
+def _prepare_content(content: str) -> str:
+    normalized = (content or "").strip()
+    if len(normalized) <= LLM_MAX_INPUT_CHARS:
+        return normalized
+    # Keep prompt size bounded for providers that enforce strict token/length limits.
+    return normalized[:LLM_MAX_INPUT_CHARS]
+
 
 def generate_summary(title: str, content: str) -> dict[str, Any]:
-    """Call Claude API and return normalized structured JSON summary."""
+    """Call configured LLM endpoint and return normalized structured JSON summary."""
 
     if not LLM_API_KEY:
         raise ValueError("Missing LLM_API_KEY in environment.")
 
+    provider = _detect_provider(LLM_API_URL)
+    endpoint = _resolve_endpoint(LLM_API_URL, provider)
+    model = _resolve_model(provider)
+    prepared_content = _prepare_content(content)
+
     # PROMPT_TEMPLATE contains many JSON braces; avoid str.format() to prevent
     # accidental placeholder parsing for fields like "tldr".
-    prompt = (
-        PROMPT_TEMPLATE.replace("{title}", title or "").replace("{content}", content or "")
-    )
+    prompt = PROMPT_TEMPLATE.replace("{title}", title or "").replace("{content}", prepared_content)
 
     headers = {
         "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
+        "max_tokens": LLM_MAX_TOKENS,
+        "stream": False,
     }
 
-    response = requests.post(LLM_API_URL, headers=headers, json=payload, timeout=60)
-    response.raise_for_status()
+    response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+    if response.status_code >= 400:
+        body_preview = (response.text or "").strip().replace("\n", " ")[:600]
+        raise requests.HTTPError(
+            f"{response.status_code} Client Error for url: {endpoint} | body={body_preview}"
+        )
 
     text = _extract_response_text(response.json())
     clean_text = _strip_code_fence(text)
