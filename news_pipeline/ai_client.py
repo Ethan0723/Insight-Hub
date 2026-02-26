@@ -26,7 +26,7 @@ LLM_API_URL = os.getenv(
 LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", ""))
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()  # auto | compatible | zhipu
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "900"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1500"))
 LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "8000"))
 LLM_EMPTY_TEXT_FALLBACK = "模型没有生成有效文本，请检查模型配置或进一步降温度/增加 max_tokens。"
 
@@ -45,8 +45,8 @@ PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分�
 
 输出 JSON 必须严格包含以下字段，且字段必须存在：
 {
-  "title_zh": "新闻中文标题（简洁准确，不超过40字）",
-  "tldr": "一句话战略判断（<=120字）",
+  "title_zh": "新闻中文标题（简洁准确，不超过32个汉字）",
+  "tldr": "一句话战略判断（<=150个汉字）",
   "impact_score": 0,
   "risk_level": "低",
   "platform": "Global",
@@ -72,6 +72,13 @@ PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分�
 6) strategic_actions.priority 只能是：P0/P1/P2
 7) strategic_actions.owner 只能是：产品/战略/商业化
 8) 仅输出合法 JSON
+9) title_zh 不超过 32 个汉字
+10) tldr 不超过 150 个汉字
+11) dimensions.*.analysis 不超过 70 个汉字
+12) strategic_actions 最多 3 条
+13) 每条 strategic_actions.action 不超过 90 个汉字
+14) tags 最多 6 个
+15) 输出总 token 尽量控制在 1200 以内
 
 特别规则：如果正文信息不足，请降低 impact_score，并在 tldr 中简要说明原因（例如“信息不足，判断置信度较低”）。
 
@@ -233,8 +240,8 @@ def _default_payload(reason: str) -> dict[str, Any]:
 def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dict[str, Any]:
     result = _default_payload("模型输出缺失字段")
 
-    result["title_zh"] = str(payload.get("title_zh") or title or result["title_zh"])[:40]
-    result["tldr"] = str(payload.get("tldr") or result["tldr"])[:120]
+    result["title_zh"] = str(payload.get("title_zh") or title or result["title_zh"])[:32]
+    result["tldr"] = str(payload.get("tldr") or result["tldr"])[:150]
 
     score = payload.get("impact_score", result["impact_score"])
     try:
@@ -246,7 +253,7 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
     if len((content or "").strip()) < 120:
         score = min(score, 30)
         if "信息不足" not in result["tldr"]:
-            result["tldr"] = f"{result['tldr']}（信息不足，判断置信度较低）"[:120]
+            result["tldr"] = f"{result['tldr']}（信息不足，判断置信度较低）"[:150]
 
     result["impact_score"] = score
 
@@ -266,7 +273,7 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
         impact = str(raw.get("impact", "无"))
         if impact not in _ALLOWED_IMPACT:
             impact = "无"
-        analysis = str(raw.get("analysis", "")) or ""
+        analysis = (str(raw.get("analysis", "")) or "")[:70]
         normalized_dims[key] = {"impact": impact, "analysis": analysis}
     result["dimensions"] = normalized_dims
 
@@ -278,7 +285,7 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
                 continue
             priority = str(action.get("priority", "P2"))
             owner = str(action.get("owner", "战略"))
-            text = str(action.get("action", "")).strip()
+            text = str(action.get("action", "")).strip()[:90]
             if priority not in _ALLOWED_PRIORITY:
                 priority = "P2"
             if owner not in _ALLOWED_OWNER:
@@ -286,6 +293,8 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
             if not text:
                 continue
             normalized_actions.append({"priority": priority, "owner": owner, "action": text})
+            if len(normalized_actions) >= 3:
+                break
 
     if not normalized_actions:
         normalized_actions = result["strategic_actions"]
@@ -293,7 +302,7 @@ def _normalize_payload(payload: dict[str, Any], title: str, content: str) -> dic
 
     tags = payload.get("tags", [])
     if isinstance(tags, list):
-        result["tags"] = [str(t) for t in tags if str(t).strip()][:12] or result["tags"]
+        result["tags"] = [str(t) for t in tags if str(t).strip()][:6] or result["tags"]
 
     return result
 
