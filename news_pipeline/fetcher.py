@@ -277,10 +277,6 @@ def _select_best_content(
     description: str,
 ) -> str:
     """Pick best content candidate with strict fallback guards."""
-    if full_content and _promo_noise_hits(full_content) >= 5:
-        # Too much promo copy, treat as unusable body and fallback.
-        full_content = None
-
     if full_content and _is_usable_article_text(full_content, title):
         return full_content.strip()
 
