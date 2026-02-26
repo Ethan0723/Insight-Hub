@@ -6,6 +6,7 @@ Responsible only for fetching and normalizing RSS news items.
 from __future__ import annotations
 
 import re
+from html import unescape
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -27,6 +28,27 @@ REQUEST_HEADERS = {
     ),
     "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
 }
+
+PROMO_NOISE_PHRASES = [
+    "sign up",
+    "join now",
+    "log in",
+    "bonus",
+    "reward",
+    "futures",
+    "spot",
+    "dex+",
+    "event center",
+    "market ticker",
+    "download app",
+    "invite friends",
+    "buy crypto",
+    "trade now",
+    "注册",
+    "登录",
+    "奖励",
+    "注册送",
+]
 
 
 def _build_google_news_windows(
@@ -106,6 +128,7 @@ def _parse_publish_time(raw: str | None) -> datetime | None:
 def _clean_html(text: str) -> str:
     """Remove basic HTML tags/entities from text."""
     cleaned = re.sub(r"<.*?>", "", text or "")
+    cleaned = unescape(cleaned)
     cleaned = cleaned.replace("&nbsp;", " ")
     cleaned = cleaned.replace("\xa0", " ")
     return re.sub(r"\s+", " ", cleaned).strip()
@@ -137,10 +160,114 @@ def _is_usable_article_text(candidate: str, title: str) -> bool:
         return False
     if _looks_like_title(candidate, title):
         return False
+    if _looks_like_navigation_noise(candidate):
+        return False
     # Reject heavily truncated snippets.
     if candidate.count("...") + candidate.count("…") >= 3:
         return False
-    return len(candidate.strip()) >= 180
+    return len(candidate.strip()) >= 140
+
+
+def _is_minimally_usable_text(candidate: str, title: str) -> bool:
+    """Softer guard used when no high-quality full text is available."""
+    if not candidate:
+        return False
+    if _looks_like_title(candidate, title):
+        return False
+    if _looks_like_navigation_noise(candidate):
+        return False
+    if candidate.count("...") + candidate.count("…") >= 4:
+        return False
+    return len(candidate.strip()) >= 90
+
+
+def _looks_like_navigation_noise(candidate: str) -> bool:
+    """Heuristic: detect site nav/menu/cookie blobs extracted as article text."""
+    text = _normalize_text(candidate)
+    if not text:
+        return True
+
+    noisy_phrases = [
+        "skip to main content",
+        "privacy policy",
+        "terms of use",
+        "cookie policy",
+        "all rights reserved",
+        "sign in",
+        "log in",
+        "subscribe",
+        "newsletter",
+        "advertisement",
+        "menu",
+        "home",
+        "contact",
+        "about us",
+        "language",
+    ]
+    hit_count = sum(1 for phrase in noisy_phrases if phrase in text)
+    if hit_count >= 3:
+        return True
+
+    # Many short language/menu tokens often means nav extraction.
+    language_tokens = [
+        "english",
+        "français",
+        "deutsch",
+        "español",
+        "русский",
+        "日本語",
+        "한국어",
+        "thai",
+        "tiếng việt",
+    ]
+    lang_hits = sum(1 for token in language_tokens if token in text)
+    if lang_hits >= 3:
+        return True
+
+    return False
+
+
+def _promo_noise_hits(text: str) -> int:
+    """Count promo/ad phrases in extracted body."""
+    lowered = _normalize_text(text)
+    if not lowered:
+        return 0
+    return sum(1 for phrase in PROMO_NOISE_PHRASES if phrase in lowered)
+
+
+def _score_content_candidate(text: str) -> float:
+    """Rank extracted candidates by body-likeness, not only length."""
+    if not text:
+        return -1e9
+
+    cleaned = text.strip()
+    if not cleaned:
+        return -1e9
+
+    paragraphs = [p for p in re.split(r"[。\n.!?]+", cleaned) if len(p.strip()) >= 20]
+    paragraph_count = len(paragraphs)
+    promo_hits = _promo_noise_hits(cleaned)
+    ellipsis_count = cleaned.count("...") + cleaned.count("…")
+    nav_penalty = 60 if _looks_like_navigation_noise(cleaned) else 0
+
+    # Length still matters, but structure + low-noise matters more.
+    score = (
+        min(len(cleaned), 4000) / 14.0
+        + paragraph_count * 18
+        - promo_hits * 45
+        - ellipsis_count * 20
+        - nav_penalty
+    )
+    return score
+
+
+def _pick_best_candidate(candidates: list[str]) -> str | None:
+    """Choose candidate with best quality score."""
+    scored = [(c, _score_content_candidate(c)) for c in candidates if c]
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[0][0]
 
 
 def _select_best_content(
@@ -150,18 +277,27 @@ def _select_best_content(
     description: str,
 ) -> str:
     """Pick best content candidate with strict fallback guards."""
+    if full_content and _promo_noise_hits(full_content) >= 5:
+        # Too much promo copy, treat as unusable body and fallback.
+        full_content = None
+
     if full_content and _is_usable_article_text(full_content, title):
         return full_content.strip()
 
-    if summary and not _looks_like_title(summary, title):
+    # If extraction got some body text but not long enough for strict quality,
+    # still prefer it over title-like RSS snippets.
+    if full_content and _is_minimally_usable_text(full_content, title):
+        return full_content.strip()
+
+    if summary and _is_minimally_usable_text(summary, title):
         return summary.strip()
-    if description and not _looks_like_title(description, title):
+    if description and _is_minimally_usable_text(description, title):
         return description.strip()
 
     merged = " ".join(
         part.strip()
         for part in [summary, description]
-        if part and not _looks_like_title(part, title)
+        if part and _is_minimally_usable_text(part, title)
     ).strip()
     return merged
 
@@ -194,6 +330,14 @@ def _extract_article_blocks(html: str) -> str | None:
     try:
         soup = BeautifulSoup(html, "html.parser")
         selectors = [
+            ".article-detail__content",
+            ".news-detail__content",
+            ".news-detail-content",
+            ".news-content",
+            ".article-body",
+            ".article-main",
+            ".news-main",
+            ".markdown-body",
             "article",
             "[itemprop='articleBody']",
             ".article-content",
@@ -218,8 +362,7 @@ def _extract_article_blocks(html: str) -> str | None:
 
         if not candidates:
             return None
-        candidates.sort(key=len, reverse=True)
-        return candidates[0]
+        return _pick_best_candidate(candidates)
     except Exception:
         return None
 
@@ -231,6 +374,26 @@ def _extract_source_url(entry: Any) -> str | None:
         return source.get("href") or source.get("url")
     if hasattr(source, "get"):
         return source.get("href") or source.get("url")
+    return None
+
+
+def _extract_url_from_description(entry: Any) -> str | None:
+    """Try to parse canonical article URL from RSS description HTML."""
+    raw_description = getattr(entry, "description", "") or getattr(entry, "summary", "")
+    if not raw_description:
+        return None
+
+    try:
+        soup = BeautifulSoup(raw_description, "html.parser")
+        for anchor in soup.find_all("a", href=True):
+            href = str(anchor["href"]).strip()
+            if not href:
+                continue
+            if href.startswith("http") and "news.google.com" not in href:
+                return href
+    except Exception:
+        return None
+
     return None
 
 
@@ -297,8 +460,7 @@ def extract_full_content(url: str) -> str | None:
         if not candidates:
             return None
 
-        candidates.sort(key=len, reverse=True)
-        return candidates[0]
+        return _pick_best_candidate(candidates)
     except Exception:
         return None
 
@@ -379,7 +541,11 @@ def fetch_rss_items(
                 rss_link = getattr(entry, "link", "")
 
                 source_url = _extract_source_url(entry)
+                description_url = _extract_url_from_description(entry)
+                preferred_source_url = description_url or source_url
                 article_url = resolve_article_url(rss_link, source_url)
+                if not article_url or "news.google.com" in article_url:
+                    article_url = preferred_source_url or article_url
                 full_content = extract_full_content(article_url)
                 content = _select_best_content(title, full_content, summary, description)
 
