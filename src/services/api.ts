@@ -209,52 +209,6 @@ function toNewsItem(row: any): NewsItem {
 }
 
 function isClearlyIrrelevant(item: NewsItem): boolean {
-  const text = `${item.title} ${item.summary} ${item.aiTldr} ${item.moduleTags.join(' ')}`.toLowerCase();
-  const irrelevantSignals = [
-    'militant',
-    'airstrike',
-    'seismic',
-    'earthquake',
-    'terror',
-    'military',
-    'cricket',
-    'football',
-    'sports',
-    'entertainment',
-    '战争',
-    '地震',
-    '军事',
-    '恐怖',
-    '体育',
-    '娱乐',
-    '非相关',
-    '非业务相关'
-  ];
-  const ecommerceSignals = [
-    'ecommerce',
-    '跨境',
-    '电商',
-    'shopify',
-    'amazon',
-    'temu',
-    'tiktok',
-    'shopline',
-    'shoplazza',
-    'payment',
-    'checkout',
-    'merchant',
-    'seller',
-    'logistics',
-    'fulfillment',
-    'tariff',
-    'customs',
-    '关税',
-    '支付',
-    '物流',
-    '平台'
-  ];
-  const hasIrrelevant = irrelevantSignals.some((s) => text.includes(s));
-  const hasEcommerce = ecommerceSignals.some((s) => text.includes(s));
   const lowConfidenceSignals = [
     '信息不足',
     '判断置信度较低',
@@ -265,8 +219,7 @@ function isClearlyIrrelevant(item: NewsItem): boolean {
   const hasLowConfidenceSignal = lowConfidenceSignals.some((s) =>
     `${item.title} ${item.aiTldr} ${item.summary}`.toLowerCase().includes(s.toLowerCase())
   );
-  const tooLowConfidence = hasLowConfidenceSignal || (item.impactScore <= 25 && item.riskLevel === '低');
-  return (hasIrrelevant && !hasEcommerce) || tooLowConfidence;
+  return hasLowConfidenceSignal;
 }
 
 function safeParseJson(value: string): any {
@@ -444,10 +397,18 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
   const stable = Math.max(30, Math.min(90, Math.round(75 - highRiskRatio * 30)));
   const policy = Math.max(35, Math.min(95, Math.round((policyIds.length / Math.max(news.length, 1)) * 220 + 45)));
 
+  const today = new Date().toLocaleDateString('en-CA');
+  const todayPool = news.filter((item) => item.publishDate === today);
+  const briefPoolBase = todayPool.length > 0 ? todayPool : news;
+  const briefPool = [...briefPoolBase].sort((a, b) => b.impactScore - a.impactScore).slice(0, 3);
+  const briefParts = briefPool.map((item) => item.aiTldr || item.title).filter(Boolean);
+  const brief =
+    briefParts.length <= 1
+      ? briefParts[0] || '今日暂无高影响新情报，建议持续监控政策与平台动态。'
+      : `今日高影响情报显示：${briefParts[0]}；同时，${briefParts.slice(1).join('；')}`;
+
   return {
-    brief:
-      news[0]?.aiTldr ||
-      '过去 24 小时跨境电商情报显示，平台竞争与政策变化共同影响收入结构。建议优先关注高风险政策与支付链路扰动。',
+    brief,
     indexes: [
       {
         id: 'growth',

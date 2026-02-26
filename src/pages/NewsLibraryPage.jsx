@@ -27,6 +27,7 @@ function NewsLibraryPage({
     ids: []
   });
   const [newsPage, setNewsPage] = useState({ list: [], total: 0, page: 1, pageSize: 9 });
+  const [lowImpactList, setLowImpactList] = useState([]);
   const [stats, setStats] = useState({ total: 0, highRisk: 0, thisWeek: 0, avgImpact: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,10 +45,21 @@ function NewsLibraryPage({
     setLoading(true);
     setError('');
 
-    Promise.all([api.searchNews(query), api.searchNews({ ...query, page: 1, pageSize: 5000 })])
-      .then(([pageRes, fullRes]) => {
+    api
+      .searchNews({ ...query, page: 1, pageSize: 5000 })
+      .then((fullRes) => {
         if (!mounted) return;
-        setNewsPage(pageRes);
+        const highImpactAll = fullRes.list.filter((item) => item.impactScore > 20);
+        const lowImpactAll = fullRes.list.filter((item) => item.impactScore <= 20);
+        const start = (query.page - 1) * query.pageSize;
+        const end = start + query.pageSize;
+        setNewsPage({
+          list: highImpactAll.slice(start, end),
+          total: highImpactAll.length,
+          page: query.page,
+          pageSize: query.pageSize
+        });
+        setLowImpactList(lowImpactAll);
 
         const now = new Date();
         const highRisk = fullRes.list.filter((item) => item.riskLevel === '高').length;
@@ -225,33 +237,76 @@ function NewsLibraryPage({
             <div key={idx} className="h-72 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
           ))}
         </div>
-      ) : newsPage.list.length === 0 ? (
+      ) : newsPage.list.length === 0 && lowImpactList.length === 0 ? (
         <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-8 text-center text-slate-400">暂无符合条件的新闻</div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {newsPage.list.map((item) => (
-            <StrategicNewsCard
-              key={item.id}
-              news={item}
-              onDetail={onOpenNews}
-              onToggleFavorite={onToggleFavorite}
-              isFavorite={favorites.includes(item.id)}
-              isRead={readIds.includes(item.id)}
-              onOpenReference={() =>
-                onOpenEvidence({
-                  id: `news-${item.id}`,
-                  title: `${item.title} 被引用关系`,
-                  newsIds: getNewsReferenceIds(item.id)
-                })
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200">主新闻区（Impact &gt; 20）</h3>
+              <span className="text-xs text-slate-400">共 {newsPage.total} 条</span>
+            </div>
+            {newsPage.list.length === 0 ? (
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-5 text-sm text-slate-400">当前筛选条件下暂无 Impact &gt; 20 的新闻。</div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {newsPage.list.map((item) => (
+                  <StrategicNewsCard
+                    key={item.id}
+                    news={item}
+                    onDetail={onOpenNews}
+                    onToggleFavorite={onToggleFavorite}
+                    isFavorite={favorites.includes(item.id)}
+                    isRead={readIds.includes(item.id)}
+                    onOpenReference={() =>
+                      onOpenEvidence({
+                        id: `news-${item.id}`,
+                        title: `${item.title} 被引用关系`,
+                        newsIds: getNewsReferenceIds(item.id)
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {lowImpactList.length > 0 ? (
+            <div className="mt-6 space-y-3 rounded-2xl border border-slate-700/70 bg-slate-900/40 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-200">低影响新闻区（Impact ≤ 20）</h3>
+                <span className="text-xs text-slate-400">共 {lowImpactList.length} 条</span>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {lowImpactList.slice(0, 12).map((item) => (
+                  <StrategicNewsCard
+                    key={item.id}
+                    news={item}
+                    onDetail={onOpenNews}
+                    onToggleFavorite={onToggleFavorite}
+                    isFavorite={favorites.includes(item.id)}
+                    isRead={readIds.includes(item.id)}
+                    onOpenReference={() =>
+                      onOpenEvidence({
+                        id: `news-low-${item.id}`,
+                        title: `${item.title} 被引用关系`,
+                        newsIds: getNewsReferenceIds(item.id)
+                      })
+                    }
+                  />
+                ))}
+              </div>
+              {lowImpactList.length > 12 ? (
+                <p className="text-xs text-slate-500">仅展示前 12 条低影响新闻，请用筛选进一步缩小范围。</p>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       )}
 
       <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
         <p className="text-xs text-slate-400">
-          第 {newsPage.page} / {totalPages} 页 · 共 {newsPage.total} 条
+          主新闻区第 {newsPage.page} / {totalPages} 页 · 共 {newsPage.total} 条
         </p>
         <div className="flex gap-2">
           <button
