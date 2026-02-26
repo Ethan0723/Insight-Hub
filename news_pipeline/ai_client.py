@@ -26,7 +26,7 @@ LLM_API_URL = os.getenv(
 LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("CLAUDE_API_KEY", ""))
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()  # auto | compatible | zhipu
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1500"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2200"))
 LLM_MAX_INPUT_CHARS = int(os.getenv("LLM_MAX_INPUT_CHARS", "8000"))
 LLM_EMPTY_TEXT_FALLBACK = "模型没有生成有效文本，请检查模型配置或进一步降温度/增加 max_tokens。"
 
@@ -73,12 +73,12 @@ PROMPT_TEMPLATE = """你是一名专注跨境电商SaaS平台战略的行业分�
 7) strategic_actions.owner 只能是：产品/战略/商业化
 8) 仅输出合法 JSON
 9) title_zh 不超过 32 个汉字
-10) tldr 不超过 150 个汉字
+10) tldr 建议 120~150 个汉字；若信息本身不足可少于120字，但不要为凑字数添加无意义内容
 11) dimensions.*.analysis 不超过 70 个汉字
 12) strategic_actions 最多 3 条
 13) 每条 strategic_actions.action 不超过 90 个汉字
 14) tags 最多 6 个
-15) 输出总 token 尽量控制在 1200 以内
+15) 输出总 token 尽量控制在 1800 以内
 
 特别规则：如果正文信息不足，请降低 impact_score，并在 tldr 中简要说明原因（例如“信息不足，判断置信度较低”）。
 
