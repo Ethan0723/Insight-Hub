@@ -7,6 +7,8 @@ const PORT = Number(process.env.PORT || 8787);
 const MODEL = process.env.LLM_MODEL || 'bedrock-claude-4-5-sonnet';
 const API_URL = process.env.LLM_API_URL || 'https://litellm.shoplazza.site/chat/completions';
 const API_KEY = process.env.LLM_API_KEY || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
@@ -172,16 +174,25 @@ ${userQuestion}
 }
 
 function buildSummaryPrompt(payload) {
-  const titles = Array.isArray(payload?.newsTitles) ? payload.newsTitles.slice(0, 12) : [];
+  const items = Array.isArray(payload?.newsItems) ? payload.newsItems.slice(0, 12) : [];
+  const fallbackTitles = Array.isArray(payload?.newsTitles) ? payload.newsTitles.slice(0, 12) : [];
+  const lines =
+    items.length > 0
+      ? items.map((item, idx) => {
+          const title = String(item?.title || '').trim();
+          const summary = String(item?.summary || '').trim();
+          return `${idx + 1}. 标题: ${title}\n   摘要: ${summary || '（无）'}`;
+        })
+      : fallbackTitles.map((title, idx) => `${idx + 1}. 标题: ${title}`);
   return `
 你是跨境 SaaS 战略顾问。
-请基于以下新闻标题，输出一段 100 字左右中文战略摘要，强调：
+请基于以下新闻标题和摘要，输出一段 100 字左右中文战略摘要，强调：
 1) 外部风险信号
 2) 对收入结构潜在影响
 3) 优先关注方向
 
-新闻标题：
-${titles.map((title, idx) => `${idx + 1}. ${title}`).join('\n')}
+新闻输入：
+${lines.join('\n')}
 `.trim();
 }
 
@@ -269,6 +280,37 @@ async function handleAiChat(req, res) {
   res.end();
 }
 
+async function handleNewsRaw(req, res) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    sendJson(res, 500, { error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on server.' });
+    return;
+  }
+
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
+  upstreamUrl.searchParams.set(
+    'select',
+    'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
+  );
+  upstreamUrl.searchParams.set('order', 'publish_time.desc');
+  upstreamUrl.searchParams.set('limit', '1000');
+
+  const upstream = await fetch(upstreamUrl.toString(), {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    sendJson(res, upstream.status || 502, { error: text || 'Supabase request failed' });
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(text);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const { method = 'GET', url = '/' } = req;
@@ -292,6 +334,11 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname === '/api/ai_chat') {
       await handleAiChat(req, res);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/news_raw') {
+      await handleNewsRaw(req, res);
       return;
     }
 

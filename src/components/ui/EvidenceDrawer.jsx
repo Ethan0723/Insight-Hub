@@ -24,7 +24,12 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
 
     try {
       await streamNewsSummary(
-        newsList.map((item) => item.title).slice(0, 12),
+        newsList
+          .map((item) => ({
+            title: item.title,
+            summary: item.summary || item.aiTldr || ''
+          }))
+          .slice(0, 12),
         {
           onToken: (token) => {
             setSummary((prev) => `${prev}${token}`);

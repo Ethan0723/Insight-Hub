@@ -16,7 +16,7 @@ export interface AIChatPayload {
 
 export interface AINewsSummaryPayload {
   task: 'news_summary';
-  newsTitles: string[];
+  newsItems: Array<{ title: string; summary?: string }>;
 }
 
 interface StreamOptions {
@@ -89,10 +89,13 @@ export async function streamAiChat(payload: AIChatPayload, options: StreamOption
   return streamSseResponse(response, options.onToken);
 }
 
-export async function streamNewsSummary(newsTitles: string[], options: StreamOptions): Promise<string> {
+export async function streamNewsSummary(
+  newsItems: Array<{ title: string; summary?: string }>,
+  options: StreamOptions
+): Promise<string> {
   const body: AINewsSummaryPayload = {
     task: 'news_summary',
-    newsTitles
+    newsItems
   };
 
   const response = await fetch(buildAiApiUrl('/api/ai_chat'), {

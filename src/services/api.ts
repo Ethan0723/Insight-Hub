@@ -360,10 +360,21 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
+async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
+  const res = await fetch('/api/news_raw');
+  if (!res.ok) {
+    throw new Error(`proxy http ${res.status}`);
+  }
+
+  const rows = await res.json();
+  if (!Array.isArray(rows)) return [];
+  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+}
+
 async function getSupabaseNewsCached(force = false): Promise<NewsItem[]> {
   const now = Date.now();
   if (!force && cache && now - cache.ts < 60_000) return cache.list;
-  const list = await fetchFromSupabaseRaw();
+  const list = hasSupabaseConfig() ? await fetchFromSupabaseRaw() : await fetchFromServerProxyRaw();
   cache = { ts: now, list };
   return list;
 }

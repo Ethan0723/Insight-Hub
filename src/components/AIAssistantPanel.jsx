@@ -98,13 +98,16 @@ function isNewsSummaryQuestion(question) {
   );
 }
 
-function pickRecentNewsTitles(news, days = 7, limit = 12) {
+function pickRecentNewsItems(news, days = 7, limit = 12) {
   const daySet = buildRecentUtc8DaySet(days);
   return (news || [])
     .filter((item) => daySet.has(utc8DayKeyFromDate(toUtc8Date(item?.createdAt) || new Date(0))))
     .sort((a, b) => (Number(b?.impactScore) || 0) - (Number(a?.impactScore) || 0))
-    .map((item) => String(item?.title || '').trim())
-    .filter(Boolean)
+    .map((item) => ({
+      title: String(item?.title || '').trim(),
+      summary: String(item?.summary || item?.aiTldr || '').trim()
+    }))
+    .filter((item) => Boolean(item.title))
     .slice(0, limit);
 }
 
@@ -227,11 +230,11 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
 
     try {
       if (isNewsSummaryQuestion(question)) {
-        const titles = pickRecentNewsTitles(news, 7, 12);
-        if (titles.length === 0) {
+        const newsItems = pickRecentNewsItems(news, 7, 12);
+        if (newsItems.length === 0) {
           throw new Error('no_recent_news');
         }
-        await streamNewsSummary(titles, {
+        await streamNewsSummary(newsItems, {
           onToken: (token) => {
             setMessages((prev) =>
               prev.map((item) => (item.id === assistantId ? { ...item, text: `${item.text}${token}` } : item))
