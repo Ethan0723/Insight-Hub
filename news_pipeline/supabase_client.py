@@ -89,6 +89,18 @@ def update_summary(news_id: str, summary: dict[str, Any] | str) -> None:
         print(f"[WARN] update_summary failed | id={news_id} | error={exc}")
 
 
+def update_news_content(news_id: str, content: str, content_hash: str) -> None:
+    """Update raw content and hash after successful body recovery."""
+    try:
+        payload = {
+            "content": (content or "").strip(),
+            "content_hash": content_hash,
+        }
+        _client.table(_TABLE).update(payload).eq("id", news_id).execute()
+    except Exception as exc:
+        print(f"[WARN] update_news_content failed | id={news_id} | error={exc}")
+
+
 def get_news_without_summary() -> list[dict[str, Any]]:
     """Return all records where summary is null."""
     response = (

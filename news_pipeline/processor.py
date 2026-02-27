@@ -255,7 +255,7 @@ def process_news_items(items: list[dict[str, Any]]) -> dict[str, Any]:
     Returns:
     {
       "stats": {"inserted": int, "skipped": int, "filtered": int, "errors": int},
-      "inserted_records": [{"id": str, "title": str, "content": str}, ...]
+      "inserted_records": [{"id": str, "title": str, "content": str, "url": str, "source": str}, ...]
     }
     """
 
@@ -314,6 +314,8 @@ def process_news_items(items: list[dict[str, Any]]) -> dict[str, Any]:
                         "id": inserted["id"],
                         "title": inserted.get("title", title),
                         "content": inserted.get("content", content),
+                        "url": inserted.get("url", url),
+                        "source": inserted.get("source", payload["source"]),
                     }
                 )
 

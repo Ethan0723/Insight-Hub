@@ -165,7 +165,7 @@ def _is_usable_article_text(candidate: str, title: str) -> bool:
     # Reject heavily truncated snippets.
     if candidate.count("...") + candidate.count("…") >= 3:
         return False
-    return len(candidate.strip()) >= 140
+    return len(candidate.strip()) >= 90
 
 
 def _is_minimally_usable_text(candidate: str, title: str) -> bool:
@@ -174,11 +174,27 @@ def _is_minimally_usable_text(candidate: str, title: str) -> bool:
         return False
     if _looks_like_title(candidate, title):
         return False
+    if _looks_like_title_suffix_stub(candidate, title):
+        return False
     if _looks_like_navigation_noise(candidate):
         return False
     if candidate.count("...") + candidate.count("…") >= 4:
         return False
-    return len(candidate.strip()) >= 90
+    return len(candidate.strip()) >= 140
+
+
+def _looks_like_title_suffix_stub(candidate: str, title: str) -> bool:
+    """Detect patterns like 'Title ... SourceName' that are not article bodies."""
+    c = _normalize_text(candidate)
+    t = _normalize_text(title)
+    if not c or not t:
+        return False
+
+    if c.startswith(t):
+        suffix = c[len(t) :].strip(" -|:")
+        if suffix and len(suffix.split()) <= 8:
+            return True
+    return False
 
 
 def _looks_like_navigation_noise(candidate: str) -> bool:
@@ -459,6 +475,26 @@ def extract_full_content(url: str) -> str | None:
         return _pick_best_candidate(candidates)
     except Exception:
         return None
+
+
+def recover_full_content(url: str, title: str, current_content: str = "") -> str | None:
+    """Try to recover a higher-quality body from the article URL."""
+    if not url:
+        return None
+    candidate = extract_full_content(url)
+    if not candidate:
+        return None
+
+    cleaned = _clean_html(candidate).strip()
+    if not cleaned:
+        return None
+    if _looks_like_title(cleaned, title) or _looks_like_title_suffix_stub(cleaned, title):
+        return None
+    if _looks_like_navigation_noise(cleaned):
+        return None
+    if len(cleaned) < max(140, len((current_content or "").strip()) + 30):
+        return None
+    return cleaned
 
 
 def _fetch_rss_entries(url: str) -> list[Any]:

@@ -4,8 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 from .ai_client import generate_summary
 from .config import load_config
-from .fetcher import fetch_rss_items
+from .fetcher import fetch_rss_items, recover_full_content
 from .processor import (
+    generate_content_hash,
     is_low_quality_content,
     is_relevant_news,
     process_news_items,
@@ -16,6 +17,7 @@ from .supabase_client import (
     get_latest_publish_time,
     get_news_missing_title_zh,
     get_news_without_summary,
+    update_news_content,
     update_summary,
 )
 
@@ -128,11 +130,42 @@ def _run_summary_generation(inserted_records: list[dict[str, str]], enable_summa
         print("[SUMMARY] Skipped (ENABLE_SUMMARY=false)")
         return
 
+    def is_low_confidence_summary(summary: dict) -> bool:
+        if not isinstance(summary, dict):
+            return False
+        tldr = str(summary.get("tldr", "")).strip()
+        if not tldr:
+            return False
+        low_conf_markers = [
+            "信息不足",
+            "置信度较低",
+            "置信度极低",
+            "无法提取有效",
+            "正文严重不足",
+            "模型未返回合法 JSON",
+        ]
+        return any(marker in tldr for marker in low_conf_markers)
+
     for record in inserted_records:
         try:
-            summary = generate_summary(record.get("title", ""), record.get("content", ""))
+            title = record.get("title", "")
+            content = record.get("content", "")
+            summary = generate_summary(title, content)
+
+            # Keep insertion, but try one more body recovery when summary signals low confidence.
+            if is_low_confidence_summary(summary):
+                recovered = recover_full_content(record.get("url", ""), title, content)
+                if recovered and recovered != content:
+                    update_news_content(
+                        news_id=record["id"],
+                        content=recovered,
+                        content_hash=generate_content_hash(recovered),
+                    )
+                    summary = generate_summary(title, recovered)
+                    print(f"[SUMMARY] Recovered body and regenerated | id={record['id']}")
+
             update_summary(record["id"], summary)
-            print(f"[SUMMARY] Updated | id={record['id']} | title={record.get('title', '')}")
+            print(f"[SUMMARY] Updated | id={record['id']} | title={title}")
         except Exception as exc:
             error_text = str(exc)
             print(f"[SUMMARY-ERROR] id={record.get('id', '')} | error={error_text}")
