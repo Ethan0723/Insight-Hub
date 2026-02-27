@@ -160,6 +160,8 @@ def _is_usable_article_text(candidate: str, title: str) -> bool:
         return False
     if _looks_like_title(candidate, title):
         return False
+    if _looks_like_market_dashboard_noise(candidate):
+        return False
     if _looks_like_navigation_noise(candidate):
         return False
     # Reject heavily truncated snippets.
@@ -175,6 +177,8 @@ def _is_minimally_usable_text(candidate: str, title: str) -> bool:
     if _looks_like_title(candidate, title):
         return False
     if _looks_like_title_suffix_stub(candidate, title):
+        return False
+    if _looks_like_market_dashboard_noise(candidate):
         return False
     if _looks_like_navigation_noise(candidate):
         return False
@@ -241,6 +245,24 @@ def _looks_like_navigation_noise(candidate: str) -> bool:
         return True
 
     return False
+
+
+def _looks_like_market_dashboard_noise(candidate: str) -> bool:
+    """Detect crypto/market dashboard pages mis-identified as article body."""
+    text = _normalize_text(candidate)
+    if not text:
+        return True
+
+    noise_phrases = [
+        "crypto market insights and analytics",
+        "top cryptocurrencies price list by market capitalization",
+        "live cryptocurrency prices",
+        "complete list with coin market capitalization rankings",
+        "price list by market capitalization",
+        "market data on this page is currently delayed",
+    ]
+    hits = sum(1 for phrase in noise_phrases if phrase in text)
+    return hits >= 2
 
 
 def _promo_noise_hits(text: str) -> int:
@@ -582,7 +604,20 @@ def fetch_rss_items(
                 article_url = resolve_article_url(rss_link, source_url)
                 if not article_url or "news.google.com" in article_url:
                     article_url = preferred_source_url or article_url
-                full_content = extract_full_content(article_url)
+
+                candidate_urls: list[str] = []
+                for maybe_url in [article_url, preferred_source_url, source_url, description_url, rss_link]:
+                    maybe = (maybe_url or "").strip()
+                    if not maybe or maybe in candidate_urls:
+                        continue
+                    candidate_urls.append(maybe)
+
+                full_candidates: list[str] = []
+                for candidate_url in candidate_urls:
+                    extracted = extract_full_content(candidate_url)
+                    if extracted:
+                        full_candidates.append(extracted)
+                full_content = _pick_best_candidate(full_candidates) if full_candidates else None
                 content = _select_best_content(title, full_content, summary, description)
 
                 if not title or not content:
