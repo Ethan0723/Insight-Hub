@@ -28,8 +28,7 @@ DEFAULT_RSS_FEEDS: list[dict[str, str]] = [
         "url": "https://news.google.com/rss/search?q=Amazon+OR+TikTok+Shop+OR+Temu+cross-border+ecommerce",
     },
     {"name": "TechCrunch Ecommerce", "url": "https://techcrunch.com/tag/e-commerce/feed/"},
-    {"name": "PracticalEcommerce", "url": "https://www.practicalecommerce.com/feed"},
-    {"name": "Shopify Blog", "url": "https://www.shopify.com/blog.atom"},
+    {"name": "Google News - PracticalEcommerce", "url": "https://news.google.com/rss/search?q=site:practicalecommerce.com"},
     {
         "name": "Google News - Shopify Investors",
         "url": "https://news.google.com/rss/search?q=site:investors.shopify.com+Shopify+press+release+OR+earnings",
@@ -43,13 +42,13 @@ DEFAULT_RSS_FEEDS: list[dict[str, str]] = [
     {"name": "Google News - Alibaba Official", "url": "https://news.google.com/rss/search?q=site:alibabagroup.com"},
     {"name": "OpenAI Blog RSS", "url": "https://openai.com/blog/rss.xml"},
     {"name": "AWS AI/ML Blog", "url": "https://aws.amazon.com/blogs/machine-learning/feed/"},
-    {"name": "DigitalCommerce360", "url": "https://www.digitalcommerce360.com/feed"},
+    {"name": "Google News - DigitalCommerce360", "url": "https://news.google.com/rss/search?q=site:digitalcommerce360.com"},
     {"name": "Global News", "url": "https://globalnews.ca/feed/"},
     {"name": "Global News US", "url": "https://globalnews.ca/us-news/feed/"},
     {"name": "Modern Retail", "url": "https://www.modernretail.co/feed"},
     {"name": "RetailDive", "url": "https://www.retaildive.com/feeds/news/"},
     {"name": "SupplyChainDive", "url": "https://www.supplychaindive.com/feeds/news/"},
-    {"name": "FreightWaves", "url": "https://www.freightwaves.com/rss"},
+    {"name": "Google News - FreightWaves", "url": "https://news.google.com/rss/search?q=site:freightwaves.com"},
     {"name": "PYMNTS", "url": "https://www.pymnts.com/feed/"},
     {"name": "PYMNTS Ecommerce", "url": "https://www.pymnts.com/news/ecommerce/feed/"},
     {"name": "Google News - WTO Policy", "url": "https://news.google.com/rss/search?q=site:wto.org ecommerce OR tariff"},
@@ -65,15 +64,11 @@ DEFAULT_RSS_FEEDS: list[dict[str, str]] = [
         "name": "Google News - US Commerce Dept",
         "url": "https://news.google.com/rss/search?q=site:commerce.gov ecommerce OR tariff",
     },
-    {"name": "a16z Feed", "url": "https://a16z.com/feed/"},
+    {"name": "Google News - a16z", "url": "https://news.google.com/rss/search?q=site:a16z.com"},
     {"name": "TechCrunch AI", "url": "https://techcrunch.com/tag/ai/feed/"},
     {"name": "WooCommerce Blog", "url": "https://woocommerce.com/blog/feed/"},
-    {"name": "Shopify Partners Blog", "url": "https://www.shopify.com/partners/blog.atom"},
-    # Stripe official blog feed endpoint has been unstable; use docs changelog as official product signal.
-    {"name": "Stripe Docs Changelog", "url": "https://docs.stripe.com/changelog.rss"},
-    {"name": "USTR", "url": "https://ustr.gov/about-us/policy-offices/press-office/press-releases/rss.xml"},
+    {"name": "Google News - USTR", "url": "https://news.google.com/rss/search?q=site:ustr.gov+trade+tariff"},
     {"name": "EU Press", "url": "https://ec.europa.eu/commission/presscorner/api/rss"},
-    {"name": "WTO News", "url": "https://www.wto.org/english/news_e/news_e.xml"},
 ]
 
 
