@@ -12,3 +12,6 @@ news_pipeline/__pycache__/
 
 # Node
 node_modules/
+
+# macOS
+.DS_Store

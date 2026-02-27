@@ -1,14 +1,35 @@
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT || 8787);
 const MODEL = process.env.LLM_MODEL || 'bedrock-claude-4-5-sonnet';
 const API_URL = process.env.LLM_API_URL || 'https://litellm.shoplazza.site/chat/completions';
 const API_KEY = process.env.LLM_API_KEY || '';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DIST_DIR = path.resolve(__dirname, '..', 'dist');
+const STATIC_BASE = (process.env.STATIC_BASE || '/Insight-Hub').replace(/\/+$/, '');
 const CORS_ALLOW_ORIGINS = (process.env.CORS_ALLOW_ORIGINS || '*')
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean);
 const MAX_BODY_BYTES = 1024 * 1024;
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2'
+};
 
 function resolveAllowedOrigin(req) {
   const origin = req.headers.origin || '';
@@ -23,6 +44,57 @@ function sendJson(res, status, data) {
     'Content-Type': 'application/json; charset=utf-8'
   });
   res.end(JSON.stringify(data));
+}
+
+function sendStaticFile(res, filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const data = fs.readFileSync(filePath);
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable'
+  });
+  res.end(data);
+}
+
+function serveFrontend(pathname, res) {
+  if (!fs.existsSync(DIST_DIR)) {
+    sendJson(res, 503, { error: 'Frontend build not found. Please run npm run build first.' });
+    return true;
+  }
+
+  if (pathname === '/') {
+    res.writeHead(302, { Location: `${STATIC_BASE}/` });
+    res.end();
+    return true;
+  }
+
+  if (pathname === STATIC_BASE) {
+    res.writeHead(302, { Location: `${STATIC_BASE}/` });
+    res.end();
+    return true;
+  }
+
+  if (!pathname.startsWith(`${STATIC_BASE}/`)) {
+    return false;
+  }
+
+  const relative = pathname.slice(`${STATIC_BASE}/`.length);
+  const requested = relative ? path.join(DIST_DIR, relative) : path.join(DIST_DIR, 'index.html');
+  const normalized = path.normalize(requested);
+  if (!normalized.startsWith(DIST_DIR)) {
+    sendJson(res, 400, { error: 'Invalid path' });
+    return true;
+  }
+
+  if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
+    sendStaticFile(res, normalized);
+    return true;
+  }
+
+  const fallback = path.join(DIST_DIR, 'index.html');
+  sendStaticFile(res, fallback);
+  return true;
 }
 
 function readJsonBody(req) {
@@ -200,6 +272,7 @@ async function handleAiChat(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const { method = 'GET', url = '/' } = req;
+    const { pathname = '/' } = new URL(url, `http://${req.headers.host || 'localhost'}`);
     const allowOrigin = resolveAllowedOrigin(req);
     res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Vary', 'Origin');
@@ -212,14 +285,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (method === 'GET' && url === '/health') {
+    if (method === 'GET' && pathname === '/health') {
       sendJson(res, 200, { ok: true });
       return;
     }
 
-    if (method === 'POST' && url === '/api/ai_chat') {
+    if (method === 'POST' && pathname === '/api/ai_chat') {
       await handleAiChat(req, res);
       return;
+    }
+
+    if (method === 'GET' || method === 'HEAD') {
+      const handled = serveFrontend(pathname, res);
+      if (handled) return;
     }
 
     sendJson(res, 404, { error: 'Not found' });
