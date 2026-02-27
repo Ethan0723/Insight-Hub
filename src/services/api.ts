@@ -582,6 +582,8 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
     const rows = news
       .filter((item) => item.platform === platform)
       .filter((item) => (platform === 'Shopify' ? !isShopifyFalsePositive(item) : true))
+      .filter((item) => !isLowConfidenceInsight(item))
+      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
       .slice(0, 4);
     const first = rows[0];
     const fallback = `暂无 ${platform} 最新事件，建议继续追踪。`;
