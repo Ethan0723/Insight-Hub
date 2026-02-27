@@ -481,7 +481,11 @@ def recover_full_content(url: str, title: str, current_content: str = "") -> str
     """Try to recover a higher-quality body from the article URL."""
     if not url:
         return None
-    candidate = extract_full_content(url)
+    target_url = resolve_article_url(url)
+    if not target_url:
+        return None
+
+    candidate = extract_full_content(target_url)
     if not candidate:
         return None
 
@@ -594,7 +598,8 @@ def fetch_rss_items(
                     {
                         "title": title,
                         "content": content,
-                        "url": rss_link,
+                        # Persist canonical article URL for downstream recovery / auditing.
+                        "url": article_url or preferred_source_url or rss_link,
                         "publish_time": raw_publish_time,
                         "source": feed_name,
                     }
