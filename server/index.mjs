@@ -4,7 +4,19 @@ const PORT = Number(process.env.PORT || 8787);
 const MODEL = process.env.LLM_MODEL || 'bedrock-claude-4-5-sonnet';
 const API_URL = process.env.LLM_API_URL || 'https://litellm.shoplazza.site/chat/completions';
 const API_KEY = process.env.LLM_API_KEY || '';
+const CORS_ALLOW_ORIGINS = (process.env.CORS_ALLOW_ORIGINS || '*')
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean);
 const MAX_BODY_BYTES = 1024 * 1024;
+
+function resolveAllowedOrigin(req) {
+  const origin = req.headers.origin || '';
+  if (CORS_ALLOW_ORIGINS.includes('*')) return '*';
+  if (!origin) return CORS_ALLOW_ORIGINS[0] || '*';
+  if (CORS_ALLOW_ORIGINS.includes(origin)) return origin;
+  return CORS_ALLOW_ORIGINS[0] || '*';
+}
 
 function sendJson(res, status, data) {
   res.writeHead(status, {
@@ -188,6 +200,17 @@ async function handleAiChat(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const { method = 'GET', url = '/' } = req;
+    const allowOrigin = resolveAllowedOrigin(req);
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     if (method === 'GET' && url === '/health') {
       sendJson(res, 200, { ok: true });

@@ -36,6 +36,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY }}
           VITE_USE_SUPABASE: ${{ secrets.VITE_USE_SUPABASE || vars.VITE_USE_SUPABASE || 'true' }}
           VITE_SUPABASE_NEWS_LIMIT: "1000"
+          VITE_AI_API_BASE: ${{ secrets.VITE_AI_API_BASE || vars.VITE_AI_API_BASE || '' }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
             echo "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in Actions secrets/variables."

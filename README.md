@@ -37,4 +37,12 @@
 3. 在 `.env` 中配置：
    - `LLM_API_KEY=...`
    - 可选：`LLM_API_URL`、`LLM_MODEL`
+   - 可选：`CORS_ALLOW_ORIGINS=http://localhost:5173,https://<你的前端域名>`
    - 可选：`VITE_GA_ID=G-XXXXXXXXXX`
+
+## 线上部署注意（AI 助手）
+
+- GitHub Pages 是纯静态托管，不会提供 `/api/ai_chat`。
+- 线上需要单独部署 `server/index.mjs`，并在前端构建时设置：
+  - `VITE_AI_API_BASE=https://<你的 AI API 域名>`
+- 若不设置 `VITE_AI_API_BASE`，前端默认请求同域 `/api/ai_chat`（仅适用于前后端同域部署）。

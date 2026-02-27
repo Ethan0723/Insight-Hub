@@ -24,6 +24,12 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
+function buildAiApiUrl(path: string): string {
+  const base = (import.meta.env.VITE_AI_API_BASE as string | undefined)?.trim();
+  if (!base) return path;
+  return `${base.replace(/\/$/, '')}${path}`;
+}
+
 async function streamSseResponse(response: Response, onToken: (token: string) => void): Promise<string> {
   if (!response.body) {
     throw new Error('Empty response body');
@@ -68,7 +74,7 @@ async function streamSseResponse(response: Response, onToken: (token: string) =>
 }
 
 export async function streamAiChat(payload: AIChatPayload, options: StreamOptions): Promise<string> {
-  const response = await fetch('/api/ai_chat', {
+  const response = await fetch(buildAiApiUrl('/api/ai_chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -89,7 +95,7 @@ export async function streamNewsSummary(newsTitles: string[], options: StreamOpt
     newsTitles
   };
 
-  const response = await fetch('/api/ai_chat', {
+  const response = await fetch(buildAiApiUrl('/api/ai_chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
