@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { streamAiChat } from '../services/ai';
+import { streamAiChat, streamNewsSummary } from '../services/ai';
 
 const DIMENSION_META = {
   subscription: { label: '订阅价格', short: '模板订阅' },
@@ -66,6 +66,46 @@ function buildFallbackAnswer(question, scoreBreakdown, priorityRanking) {
     '- 将问题拆为 2 周实验，按 Final 变化复盘。',
     `- 当前问题：${question}`
   ].join('\n');
+}
+
+function toUtc8Date(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getTime() + 8 * 60 * 60 * 1000);
+}
+
+function utc8DayKeyFromDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildRecentUtc8DaySet(days = 7) {
+  const base = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const daySet = new Set();
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(base.getTime() - i * 24 * 60 * 60 * 1000);
+    daySet.add(utc8DayKeyFromDate(d));
+  }
+  return daySet;
+}
+
+function isNewsSummaryQuestion(question) {
+  const q = String(question || '').toLowerCase();
+  return (
+    (/总结|汇总|概览|盘点/.test(q) && /新闻|情报|动态/.test(q)) ||
+    (/近7天|最近7天|过去7天|一周|本周/.test(q) && /新闻|情报|动态/.test(q))
+  );
+}
+
+function pickRecentNewsTitles(news, days = 7, limit = 12) {
+  const daySet = buildRecentUtc8DaySet(days);
+  return (news || [])
+    .filter((item) => daySet.has(utc8DayKeyFromDate(toUtc8Date(item?.createdAt) || new Date(0))))
+    .sort((a, b) => (Number(b?.impactScore) || 0) - (Number(a?.impactScore) || 0))
+    .map((item) => String(item?.title || '').trim())
+    .filter(Boolean)
+    .slice(0, limit);
 }
 
 function AssistantBubble({ message, onOpenEvidence }) {
@@ -186,29 +226,46 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
     setInput('');
 
     try {
-      await streamAiChat(
-        {
-          userQuestion: question,
-          baseline: scoreBreakdown?.baseline?.overall || 0,
-          delta: scoreBreakdown?.delta?.overall || 0,
-          finalScore: scoreBreakdown?.final?.overall || 0,
-          exposureMatrix,
-          priorityRanking
-        },
-        {
+      if (isNewsSummaryQuestion(question)) {
+        const titles = pickRecentNewsTitles(news, 7, 12);
+        if (titles.length === 0) {
+          throw new Error('no_recent_news');
+        }
+        await streamNewsSummary(titles, {
           onToken: (token) => {
             setMessages((prev) =>
               prev.map((item) => (item.id === assistantId ? { ...item, text: `${item.text}${token}` } : item))
             );
           }
-        }
-      );
+        });
+      } else {
+        await streamAiChat(
+          {
+            userQuestion: question,
+            baseline: scoreBreakdown?.baseline?.overall || 0,
+            delta: scoreBreakdown?.delta?.overall || 0,
+            finalScore: scoreBreakdown?.final?.overall || 0,
+            exposureMatrix,
+            priorityRanking
+          },
+          {
+            onToken: (token) => {
+              setMessages((prev) =>
+                prev.map((item) => (item.id === assistantId ? { ...item, text: `${item.text}${token}` } : item))
+              );
+            }
+          }
+        );
+      }
 
       setMessages((prev) =>
         prev.map((item) => (item.id === assistantId ? { ...item, pending: false } : item))
       );
     } catch (error) {
-      const fallback = buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
+      const noRecentNews = String(error?.message || '').includes('no_recent_news');
+      const fallback = noRecentNews
+        ? '近7天（UTC+8）暂无可用于总结的新闻标题，请稍后再试或先检查新闻抓取状态。'
+        : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantId
@@ -216,7 +273,7 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
                 ...item,
                 text: item.text || fallback,
                 pending: false,
-                error: 'AI 服务暂不可用，已返回规则引擎兜底建议。'
+                error: noRecentNews ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
               }
             : item
         )
