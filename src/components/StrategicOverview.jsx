@@ -45,7 +45,7 @@ function StrategicOverview({ brief, indexes, onOpenEvidence }) {
 
       <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 lg:p-5">
         <p className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">AI 今日战略判断</p>
-        <p className="min-h-[92px] text-sm leading-7 text-slate-100 lg:text-base">
+        <p className="min-h-[92px] whitespace-pre-line text-sm leading-7 text-slate-100 lg:text-base">
           {typed}
           <span className="ml-1 inline-block h-5 w-[2px] animate-pulse bg-cyan-300 align-middle" />
         </p>

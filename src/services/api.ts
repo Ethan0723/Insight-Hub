@@ -379,6 +379,70 @@ function buildTrendFromNews(news: NewsItem[], newsIds: NewsId[], fallbackScore: 
   });
 }
 
+const lowConfidencePattern = /(信息不足|置信度较低|模型未返回合法 JSON|暂无法评估|正文严重不足)/i;
+
+function isLowConfidenceInsight(item: NewsItem): boolean {
+  const text = `${item.aiTldr || ''} ${item.summary || ''}`.trim();
+  return lowConfidencePattern.test(text);
+}
+
+function summarizeSignals(items: NewsItem[]): string[] {
+  return items.slice(0, 3).map((item, index) => {
+    const signal = (item.aiTldr || item.summary || item.title || '').replace(/\s+/g, ' ').trim();
+    const clipped = signal.length > 70 ? `${signal.slice(0, 70)}...` : signal;
+    return `${index + 1}. ${clipped}`;
+  });
+}
+
+function buildStrategicBrief(news: NewsItem[]): string {
+  const today = new Date().toLocaleDateString('en-CA');
+  const todayPool = news.filter((item) => item.publishDate === today);
+  const scoped = todayPool.length > 0 ? todayPool : news;
+
+  const highQuality = scoped
+    .filter((item) => !isLowConfidenceInsight(item) && item.impactScore >= 25)
+    .sort((a, b) => b.impactScore - a.impactScore);
+
+  const pool = (highQuality.length > 0 ? highQuality : [...scoped].sort((a, b) => b.impactScore - a.impactScore)).slice(0, 5);
+
+  if (pool.length === 0) {
+    return [
+      '【核心判断】',
+      '今日暂无可用高影响信号，建议维持观望并持续跟踪政策与平台动态。',
+      '',
+      '【关键影响】',
+      '1. 有效样本不足，暂不建议调整核心经营参数。',
+      '',
+      '【建议动作】',
+      '1. 优先补充高质量情报源并复核当日抓取结果。'
+    ].join('\n');
+  }
+
+  const top = pool[0];
+  const riskHighCount = pool.filter((item) => item.riskLevel === '高').length;
+  const focusDimensions = Array.from(new Set(pool.flatMap((item) => item.impactDimensions))).slice(0, 3).join('、') || '订阅、佣金、支付';
+  const averageImpact = Math.round(pool.reduce((sum, item) => sum + item.impactScore, 0) / pool.length);
+  const signalList = summarizeSignals(pool);
+
+  const headline = `${top.titleZh || top.title}（影响评分 ${top.impactScore}）`;
+  const riskSentence =
+    riskHighCount > 0
+      ? `样本中高风险信号 ${riskHighCount} 条，重点暴露在 ${focusDimensions} 维度。`
+      : `当前样本以中低风险为主，但 ${focusDimensions} 维度仍需持续监控。`;
+
+  return [
+    '【核心判断】',
+    `今日信号以“${headline}”为主导，平均影响评分 ${averageImpact}。${riskSentence}`,
+    '',
+    '【关键影响】',
+    ...signalList,
+    '',
+    '【建议动作】',
+    `1. 先围绕 ${focusDimensions} 做参数敏感度复盘，验证是否触发成本或转化波动。`,
+    '2. 对高风险或高影响新闻补做证据链复核，避免基于单条异常信号做过度决策。'
+  ].join('\n');
+}
+
 function buildDailyInsight(news: NewsItem[]): DailyInsight {
   if (news.length === 0) return mockDailyInsight;
 
@@ -397,15 +461,7 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
   const stable = Math.max(30, Math.min(90, Math.round(75 - highRiskRatio * 30)));
   const policy = Math.max(35, Math.min(95, Math.round((policyIds.length / Math.max(news.length, 1)) * 220 + 45)));
 
-  const today = new Date().toLocaleDateString('en-CA');
-  const todayPool = news.filter((item) => item.publishDate === today);
-  const briefPoolBase = todayPool.length > 0 ? todayPool : news;
-  const briefPool = [...briefPoolBase].sort((a, b) => b.impactScore - a.impactScore).slice(0, 3);
-  const briefParts = briefPool.map((item) => item.aiTldr || item.title).filter(Boolean);
-  const brief =
-    briefParts.length <= 1
-      ? briefParts[0] || '今日暂无高影响新情报，建议持续监控政策与平台动态。'
-      : `今日高影响情报显示：${briefParts[0]}；同时，${briefParts.slice(1).join('；')}`;
+  const brief = buildStrategicBrief(news);
 
   return {
     brief,

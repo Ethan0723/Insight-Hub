@@ -355,18 +355,54 @@ def _request_llm_text(
     return normalized["text"], normalized
 
 
-def _try_extract_json(text: str) -> dict[str, Any] | None:
-    """Try extracting the first JSON-like object from text."""
+def _find_balanced_json_object(text: str) -> str | None:
+    """Find first balanced JSON object string, tolerating surrounding text."""
     if not text:
         return None
-    matches = re.findall(r"\{.*?\}", text, flags=re.S)
-    for candidate in matches:
-        try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            continue
+
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        start = text.find("{", start + 1)
+
+    return None
+
+
+def _try_extract_json(text: str) -> dict[str, Any] | None:
+    """Try extracting the first complete JSON object from arbitrary text."""
+    if not text:
+        return None
+
+    candidate = _find_balanced_json_object(text)
+    if not candidate:
+        return None
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
     return None
 
 
