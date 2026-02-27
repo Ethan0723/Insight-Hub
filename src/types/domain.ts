@@ -4,6 +4,7 @@ export interface NewsItem {
   id: NewsId;
   title: string;
   source: string;
+  createdAt?: string;
   publishDate: string;
   platform: string;
   region: string;

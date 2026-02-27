@@ -24,6 +24,27 @@ const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
 
+function parseUtcTimestamp(raw: unknown): Date | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+  const withZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
+  const date = new Date(withZone);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toUtc8DayKey(raw: unknown): string {
+  const date = parseUtcTimestamp(raw);
+  if (!date) return '';
+  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
+  return new Date(utc8Ms).toISOString().slice(0, 10);
+}
+
+function utc8TodayKey(): string {
+  const utc8Ms = Date.now() + 8 * 60 * 60 * 1000;
+  return new Date(utc8Ms).toISOString().slice(0, 10);
+}
+
 function normalizeRiskLevel(value: unknown): '低' | '中' | '高' {
   const text = String(value || '').trim();
   if (text === '高') return '高';
@@ -186,12 +207,17 @@ function toNewsItem(row: any): NewsItem {
   const rawPlatform = String(row.platform || summaryObj?.platform || '').trim();
   const platform = isNegatedShopifyTitle(title) && rawPlatform === 'Shopify' ? 'Global' : rawPlatform || inferredPlatform;
   const region = String(row.region || summaryObj?.region || '').trim() || 'Global';
+  const createdAt = parseUtcTimestamp(row.created_at)?.toISOString() || new Date().toISOString();
+  const publishDate = row.publish_time
+    ? new Date(row.publish_time).toISOString().slice(0, 10)
+    : toUtc8DayKey(createdAt) || new Date().toISOString().slice(0, 10);
 
   return {
     id: row.id,
     title,
     source,
-    publishDate: row.publish_time ? new Date(row.publish_time).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    createdAt,
+    publishDate,
     platform,
     region,
     moduleTags,
@@ -313,7 +339,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
   const url = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   url.searchParams.set(
     'select',
-    'id,title,content,source,url,publish_time,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
+    'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
   url.searchParams.set('order', 'publish_time.desc');
   url.searchParams.set('limit', String(SUPABASE_LIMIT));
@@ -387,8 +413,8 @@ function isLowConfidenceInsight(item: NewsItem): boolean {
 }
 
 function buildStrategicBrief(news: NewsItem[]): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const todayPool = news.filter((item) => item.publishDate === today);
+  const today = utc8TodayKey();
+  const todayPool = news.filter((item) => toUtc8DayKey(item.createdAt) === today);
   const scoped = todayPool.length > 0 ? todayPool : news;
 
   const sortedByImpact = [...scoped]

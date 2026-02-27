@@ -6,6 +6,22 @@ import IntelligenceFeed from '../components/IntelligenceFeed';
 import CompetitionMatrix from '../components/CompetitionMatrix';
 import ModelExplainPanel from '../components/ModelExplainPanel';
 
+function toUtc8DayKey(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+  const withZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
+  const date = new Date(withZone);
+  if (Number.isNaN(date.getTime())) return '';
+  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
+  return new Date(utc8Ms).toISOString().slice(0, 10);
+}
+
+function utc8TodayKey() {
+  const utc8Ms = Date.now() + 8 * 60 * 60 * 1000;
+  return new Date(utc8Ms).toISOString().slice(0, 10);
+}
+
 function DashboardPage({
   insight,
   matrix,
@@ -24,8 +40,8 @@ function DashboardPage({
   onOpenLibraryByIds
 }) {
   const feedNews = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const todayNews = news.filter((item) => item.publishDate === today);
+    const today = utc8TodayKey();
+    const todayNews = news.filter((item) => toUtc8DayKey(item.createdAt) === today);
     return [...todayNews]
       .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
       .slice(0, 8);
