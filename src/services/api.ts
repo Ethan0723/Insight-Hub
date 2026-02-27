@@ -386,24 +386,19 @@ function isLowConfidenceInsight(item: NewsItem): boolean {
   return lowConfidencePattern.test(text);
 }
 
-function summarizeSignals(items: NewsItem[]): string[] {
-  return items.slice(0, 3).map((item, index) => {
-    const signal = (item.aiTldr || item.summary || item.title || '').replace(/\s+/g, ' ').trim();
-    const clipped = signal.length > 70 ? `${signal.slice(0, 70)}...` : signal;
-    return `${index + 1}. ${clipped}`;
-  });
-}
-
 function buildStrategicBrief(news: NewsItem[]): string {
-  const today = new Date().toLocaleDateString('en-CA');
+  const today = new Date().toISOString().slice(0, 10);
   const todayPool = news.filter((item) => item.publishDate === today);
   const scoped = todayPool.length > 0 ? todayPool : news;
 
-  const highQuality = scoped
-    .filter((item) => !isLowConfidenceInsight(item) && item.impactScore >= 25)
+  const sortedByImpact = [...scoped]
     .sort((a, b) => b.impactScore - a.impactScore);
 
-  const pool = (highQuality.length > 0 ? highQuality : [...scoped].sort((a, b) => b.impactScore - a.impactScore)).slice(0, 5);
+  const highQuality = sortedByImpact
+    .filter((item) => !isLowConfidenceInsight(item) && item.impactScore >= 25)
+    .slice(0, 1);
+
+  const pool = (highQuality.length > 0 ? highQuality : sortedByImpact.slice(0, 1));
 
   if (pool.length === 0) {
     return [
@@ -422,7 +417,7 @@ function buildStrategicBrief(news: NewsItem[]): string {
   const riskHighCount = pool.filter((item) => item.riskLevel === '高').length;
   const focusDimensions = Array.from(new Set(pool.flatMap((item) => item.impactDimensions))).slice(0, 3).join('、') || '订阅、佣金、支付';
   const averageImpact = Math.round(pool.reduce((sum, item) => sum + item.impactScore, 0) / pool.length);
-  const signalList = summarizeSignals(pool);
+  const signalText = (top.aiTldr || top.summary || top.title || '').replace(/\s+/g, ' ').trim();
 
   const headline = `${top.titleZh || top.title}（影响评分 ${top.impactScore}）`;
   const riskSentence =
@@ -435,7 +430,7 @@ function buildStrategicBrief(news: NewsItem[]): string {
     `今日信号以“${headline}”为主导，平均影响评分 ${averageImpact}。${riskSentence}`,
     '',
     '【关键影响】',
-    ...signalList,
+    `1. ${signalText}`,
     '',
     '【建议动作】',
     `1. 先围绕 ${focusDimensions} 做参数敏感度复盘，验证是否触发成本或转化波动。`,

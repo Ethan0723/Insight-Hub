@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import StrategicOverview from '../components/StrategicOverview';
 import ReasoningEngine from '../components/ReasoningEngine';
 import RevenueImpact from '../components/RevenueImpact';
@@ -22,6 +23,14 @@ function DashboardPage({
   onOpenEvidence,
   onOpenLibraryByIds
 }) {
+  const feedNews = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const todayNews = news.filter((item) => item.publishDate === today);
+    return [...todayNews]
+      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
+      .slice(0, 8);
+  }, [news]);
+
   return (
     <>
       <div id="overview">
@@ -47,7 +56,7 @@ function DashboardPage({
 
       <div id="feed">
         <IntelligenceFeed
-          news={news.slice(0, 8)}
+          news={feedNews}
           favorites={favorites}
           readIds={readIds}
           onToggleFavorite={onToggleFavorite}
