@@ -405,7 +405,8 @@ function buildTrendFromNews(news: NewsItem[], newsIds: NewsId[], fallbackScore: 
   });
 }
 
-const lowConfidencePattern = /(信息不足|置信度较低|模型未返回合法 JSON|暂无法评估|正文严重不足)/i;
+const lowConfidencePattern =
+  /(信息不足|置信度较低|置信度极低|模型未返回合法 JSON|暂无法评估|正文严重不足|无法提取有效商业洞察|缺乏实质性战略内容|信息严重不匹配|与电商业务无关|无法进行有效战略分析)/i;
 
 function isLowConfidenceInsight(item: NewsItem): boolean {
   const text = `${item.aiTldr || ''} ${item.summary || ''}`.trim();
