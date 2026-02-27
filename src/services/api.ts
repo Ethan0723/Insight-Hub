@@ -21,8 +21,10 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
+const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
+let runtimeDataSource: 'supabase_direct' | 'server_proxy' | 'mock' = 'mock';
 
 function parseUtcTimestamp(raw: unknown): Date | null {
   const text = String(raw || '').trim();
@@ -357,6 +359,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
 
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
+  runtimeDataSource = 'supabase_direct';
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
@@ -368,6 +371,7 @@ async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
 
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
+  runtimeDataSource = 'server_proxy';
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
@@ -703,12 +707,15 @@ function buildScoreBreakdown(news: NewsItem[], scenario: RevenueScenario): Score
 }
 
 async function getRealOrMockNews(force = false): Promise<NewsItem[]> {
-  if (!hasSupabaseConfig()) return fallbackNews();
   try {
     const list = await getSupabaseNewsCached(force);
     return list.length > 0 ? list : fallbackNews();
   } catch (err) {
-    console.warn('[api] Supabase unavailable, fallback to mock.', err);
+    if (!ALLOW_MOCK_FALLBACK) {
+      throw err;
+    }
+    console.warn('[api] live source unavailable, fallback to mock.', err);
+    runtimeDataSource = 'mock';
     return fallbackNews();
   }
 }
