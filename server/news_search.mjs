@@ -96,7 +96,7 @@ function buildMatchText(row) {
 }
 
 function choosePublishedAt(row) {
-  return row?.publish_time || row?.published_at || row?.created_at || '';
+  return row?.publish_time || row?.created_at || '';
 }
 
 function computeScore(row, keywords, nowMs) {
@@ -141,7 +141,7 @@ async function fetchCandidates({
   const base = new URL(`${supabaseUrl}/rest/v1/news_raw`);
   base.searchParams.set(
     'select',
-    'id,title,url,source,publish_time,published_at,created_at,summary,content,description'
+    'id,title,url,source,publish_time,created_at,summary,content'
   );
   base.searchParams.set('order', 'publish_time.desc,created_at.desc');
   base.searchParams.set('limit', String(hardLimit));
