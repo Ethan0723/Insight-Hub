@@ -76,10 +76,10 @@ export interface ReasoningNode {
 }
 
 export interface StrategySignal {
-  signal: string;
-  why: string;
+  dimension: string;
   score: number;
-  dimension: '订阅' | '佣金' | '支付' | '生态' | string;
+  high_risk_count: number;
+  summary: string;
 }
 
 export interface StrategyNews {
@@ -87,17 +87,9 @@ export interface StrategyNews {
   title: string;
   url: string;
   source: string;
-  published_at: string;
   impact_score: number;
   risk_level: '低' | '中' | '高';
   why_used: string;
-  dimension: string;
-}
-
-export interface StrategyDimension {
-  dimension: '订阅' | '佣金' | '支付' | '生态';
-  score: number;
-  summary: string;
 }
 
 export interface StrategyAction {
@@ -110,7 +102,6 @@ export interface StrategyBrief {
   headline: string;
   time_window: string;
   top_signals: StrategySignal[];
-  dimension_risk: StrategyDimension[];
   top_news: StrategyNews[];
   actions: StrategyAction[];
   meta: {
