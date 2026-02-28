@@ -428,58 +428,138 @@ function isLowConfidenceInsight(item: NewsItem): boolean {
   return lowConfidencePattern.test(text);
 }
 
-function buildStrategicBrief(news: NewsItem[]): string {
-  const today = utc8TodayKey();
-  const todayPool = news.filter((item) => toUtc8DayKey(item.createdAt) === today);
-  const scoped = todayPool.length > 0 ? todayPool : news;
-
-  const sortedByImpact = [...scoped]
-    .sort((a, b) => b.impactScore - a.impactScore);
-
-  const highQuality = sortedByImpact
-    .filter((item) => !isLowConfidenceInsight(item) && item.impactScore >= 25)
-    .slice(0, 1);
-
-  const pool = (highQuality.length > 0 ? highQuality : sortedByImpact.slice(0, 1));
-
-  if (pool.length === 0) {
-    return [
-      '【核心判断】',
-      '今日暂无可用高影响信号，建议维持观望并持续跟踪政策与平台动态。',
-      '',
-      '【关键影响】',
-      '1. 有效样本不足，暂不建议调整核心经营参数。',
-      '',
-      '【建议动作】',
-      '1. 优先补充高质量情报源并复核当日抓取结果。'
-    ].join('\n');
-  }
-
-  const top = pool[0];
-  const riskHighCount = pool.filter((item) => item.riskLevel === '高').length;
-  const focusDimensions = Array.from(new Set(pool.flatMap((item) => item.impactDimensions))).slice(0, 3).join('、') || '订阅、佣金、支付';
-  const averageImpact = Math.round(pool.reduce((sum, item) => sum + item.impactScore, 0) / pool.length);
-  const signalText = (top.aiTldr || top.summary || top.title || '').replace(/\s+/g, ' ').trim();
-
-  const headline = `${top.titleZh || top.title}（影响评分 ${top.impactScore}）`;
-  const riskSentence =
-    riskHighCount > 0
-      ? `样本中高风险信号 ${riskHighCount} 条，重点暴露在 ${focusDimensions} 维度。`
-      : `当前样本以中低风险为主，但 ${focusDimensions} 维度仍需持续监控。`;
-
-  return [
-    '【核心判断】',
-    `今日信号以“${headline}”为主导，平均影响评分 ${averageImpact}。${riskSentence}`,
-    '',
-    '【关键影响】',
-    `1. ${signalText}`,
-    '',
-    '【建议动作】',
-    `1. 先围绕 ${focusDimensions} 做参数敏感度复盘，验证是否触发成本或转化波动。`,
-    '2. 对高风险或高影响新闻补做证据链复核，避免基于单条异常信号做过度决策。'
-  ].join('\n');
+function truncate(text: string, length: number): string {
+  const clean = String(text || '').trim();
+  if (clean.length <= length) return clean || '—';
+  return `${clean.slice(0, length)}…`;
 }
 
+function buildDailyStrategyBrief(news: NewsItem[]) {
+  const now = Date.now();
+  const windowMs = 72 * 60 * 60 * 1000;
+  const threshold = now - windowMs;
+
+  const recent = [...news]
+    .map((item) => {
+      const timeValue = Date.parse(item.createdAt || item.publishDate || '') || 0;
+      return { item, timeValue };
+    })
+    .filter((entry) => entry.timeValue >= threshold)
+    .filter(({ item }) => !isLowConfidenceInsight(item));
+
+  const candidates = recent.slice(0, 100);
+  const meta = {
+    news_count_scanned: Math.min(recent.length, 100),
+    news_count_used: 0,
+    generated_at: new Date().toISOString()
+  };
+
+  if (!candidates.length) {
+    return {
+      headline: '近72小时暂无足够高置信新闻',
+      time_window: '近72小时',
+      top_signals: [],
+      dimension_risk: ['订阅', '佣金', '支付', '生态'].map((dim) => ({
+        dimension: dim,
+        score: 0,
+        summary: '暂无高质量信号'
+      })),
+      top_news: [],
+      actions: [],
+      meta
+    };
+  }
+
+  const riskOrder = { 高: 3, 中: 2, 低: 1 };
+  const scored = candidates
+    .map(({ item, timeValue }) => {
+      const impact = Number.isFinite(item.impactScore) ? item.impactScore : 60;
+      const recencyBonus = Math.max(0, 10 - (now - timeValue) / (1000 * 60 * 60 * 24) / 3);
+      const score = (riskOrder[item.riskLevel] || 1) * 10 + impact + recencyBonus;
+      return { item, score, timeValue };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.timeValue - a.timeValue;
+    });
+
+  const topNews = scored.slice(0, 6).map(({ item }) => ({
+    id: item.id,
+    title: truncate(item.title || item.aiTldr || 'Untitled', 60),
+    url: item.originalUrl || item.url || '',
+    source: item.source || 'Unknown',
+    published_at: item.publishDate || item.createdAt || '',
+    impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
+    risk_level: item.riskLevel || '中',
+    why_used: truncate(item.summary || item.aiTldr || '来自新闻', 30),
+    dimension: item.impactDimensions[0] || item.moduleTags[0] || '生态'
+  }));
+
+  const topSignals = topNews.slice(0, 4).map((news, idx) => ({
+    signal: news.dimension || `信号${idx + 1}`,
+    why: news.why_used || '无详细说明',
+    score: news.impact_score,
+    dimension: news.dimension
+  }));
+
+  const dimensionList: StrategyDimension['dimension'][] = ['订阅', '佣金', '支付', '生态'];
+  const dimensionRisk = dimensionList.map((dim) => {
+    const related = topNews.filter((news) => news.dimension === dim);
+    const score = related.length
+      ? Math.round(related.reduce((sum, news) => sum + news.impact_score, 0) / related.length)
+      : 0;
+    const summary = related.length
+      ? `来自 ${related[0].source} 的 ${truncate(related[0].title, 24)}`
+      : '暂无相关高置信度新闻';
+    return {
+      dimension: dim,
+      score,
+      summary
+    };
+  });
+
+  const actions: StrategyAction[] = [];
+  if (topNews.length) {
+    const top = topNews[0];
+    actions.push({
+      priority: 'P0',
+      owner: '战略',
+      action: truncate(`${top.source} ${top.dimension} 风险继续演化，需复盘`, 40)
+    });
+  }
+  if (topNews.length > 1) {
+    const second = topNews[1];
+    actions.push({
+      priority: 'P1',
+      owner: '产品',
+      action: truncate(`评估${second.dimension}支撑与${second.source}走势`, 40)
+    });
+  }
+  if (topNews.length > 2) {
+    const third = topNews[2];
+    actions.push({
+      priority: 'P2',
+      owner: '商业化',
+      action: truncate(`编制${third.source} 相关客户沟通素材`, 40)
+    });
+  }
+
+  meta.news_count_used = topNews.length;
+
+  const headline = topNews.length
+    ? truncate(`${topNews[0].source} ${topNews[0].dimension} 风险正在提升`, 60)
+    : '近72小时暂无足够高置信新闻';
+
+  return {
+    headline,
+    time_window: '近72小时',
+    top_signals: topSignals,
+    dimension_risk: dimensionRisk,
+    top_news: topNews,
+    actions,
+    meta
+  };
+}
 function buildDailyInsight(news: NewsItem[]): DailyInsight {
   if (news.length === 0) return mockDailyInsight;
 
@@ -498,10 +578,12 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
   const stable = Math.max(30, Math.min(90, Math.round(75 - highRiskRatio * 30)));
   const policy = Math.max(35, Math.min(95, Math.round((policyIds.length / Math.max(news.length, 1)) * 220 + 45)));
 
-  const brief = buildStrategicBrief(news);
+  const strategyBrief = buildDailyStrategyBrief(news);
+  const brief = strategyBrief.headline;
 
   return {
     brief,
+    strategyBrief,
     indexes: [
       {
         id: 'growth',

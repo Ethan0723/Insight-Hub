@@ -75,6 +75,51 @@ export interface ReasoningNode {
   evidence: EvidenceLink;
 }
 
+export interface StrategySignal {
+  signal: string;
+  why: string;
+  score: number;
+  dimension: '订阅' | '佣金' | '支付' | '生态' | string;
+}
+
+export interface StrategyNews {
+  id: NewsId;
+  title: string;
+  url: string;
+  source: string;
+  published_at: string;
+  impact_score: number;
+  risk_level: '低' | '中' | '高';
+  why_used: string;
+  dimension: string;
+}
+
+export interface StrategyDimension {
+  dimension: '订阅' | '佣金' | '支付' | '生态';
+  score: number;
+  summary: string;
+}
+
+export interface StrategyAction {
+  priority: 'P0' | 'P1' | 'P2';
+  owner: '战略' | '产品' | '商业化';
+  action: string;
+}
+
+export interface StrategyBrief {
+  headline: string;
+  time_window: string;
+  top_signals: StrategySignal[];
+  dimension_risk: StrategyDimension[];
+  top_news: StrategyNews[];
+  actions: StrategyAction[];
+  meta: {
+    news_count_scanned: number;
+    news_count_used: number;
+    generated_at: string;
+  };
+}
+
 export interface DailyInsight {
   brief: string;
   indexes: IndexItem[];
@@ -83,6 +128,7 @@ export interface DailyInsight {
   dimensions: Array<{ name: string; score: number; evidence: EvidenceLink }>;
   priorities: string[];
   updatedAt: string;
+  strategyBrief: StrategyBrief;
 }
 
 export interface MatrixRow {

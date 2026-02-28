@@ -50,7 +50,7 @@ function DashboardPage({
   return (
     <>
       <div id="overview">
-        <StrategicOverview brief={insight.brief} indexes={insight.indexes} onOpenEvidence={onOpenEvidence} />
+        <StrategicOverview strategyBrief={insight.strategyBrief} indexes={insight.indexes} onOpenEvidence={onOpenEvidence} />
       </div>
 
       <div id="revenue">
