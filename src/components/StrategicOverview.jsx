@@ -14,8 +14,6 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
 
   return (
     <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-8">
-  return (
-    <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="mb-1 text-xs uppercase tracking-[0.18em] text-slate-500">AI 今日战略判断</p>
