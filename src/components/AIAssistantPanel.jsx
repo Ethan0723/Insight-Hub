@@ -132,6 +132,25 @@ function AssistantBubble({ message, onOpenEvidence }) {
 
         <div className="whitespace-pre-wrap text-sm leading-6 text-slate-100">{message.text || (message.pending ? '正在基于当前评分与暴露矩阵生成策略回答...' : '')}</div>
 
+        {Array.isArray(message.sources) && message.sources.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/40 p-2">
+            <p className="mb-1 text-[11px] text-cyan-200">引用来源</p>
+            <div className="space-y-1">
+              {message.sources.map((src, idx) => (
+                <a
+                  key={`${src.url}-${idx}`}
+                  href={src.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-[11px] text-slate-300 hover:text-cyan-200"
+                >
+                  [{idx + 1}] {src.published_at || ''} {src.source || ''} {src.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {message.error ? <p className="mt-2 text-xs text-rose-300">{message.error}</p> : null}
 
         {message.structure ? (
@@ -221,6 +240,7 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
         id: assistantId,
         role: 'assistant',
         text: '',
+        sources: [],
         structure,
         pending: true,
         error: ''
@@ -239,6 +259,11 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
             setMessages((prev) =>
               prev.map((item) => (item.id === assistantId ? { ...item, text: `${item.text}${token}` } : item))
             );
+          },
+          onSources: (sources) => {
+            setMessages((prev) =>
+              prev.map((item) => (item.id === assistantId ? { ...item, sources } : item))
+            );
           }
         });
       } else {
@@ -255,6 +280,11 @@ function AIAssistantPanel({ data, open, onClose, scoreBreakdown, news, onOpenEvi
             onToken: (token) => {
               setMessages((prev) =>
                 prev.map((item) => (item.id === assistantId ? { ...item, text: `${item.text}${token}` } : item))
+              );
+            },
+            onSources: (sources) => {
+              setMessages((prev) =>
+                prev.map((item) => (item.id === assistantId ? { ...item, sources } : item))
               );
             }
           }

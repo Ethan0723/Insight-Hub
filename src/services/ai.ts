@@ -21,6 +21,7 @@ export interface AINewsSummaryPayload {
 
 interface StreamOptions {
   onToken: (token: string) => void;
+  onSources?: (sources: Array<{ title: string; url: string; published_at?: string; source?: string }>) => void;
   signal?: AbortSignal;
 }
 
@@ -30,7 +31,11 @@ function buildAiApiUrl(path: string): string {
   return `${base.replace(/\/$/, '')}${path}`;
 }
 
-async function streamSseResponse(response: Response, onToken: (token: string) => void): Promise<string> {
+async function streamSseResponse(
+  response: Response,
+  onToken: (token: string) => void,
+  onSources?: (sources: Array<{ title: string; url: string; published_at?: string; source?: string }>) => void
+): Promise<string> {
   if (!response.body) {
     throw new Error('Empty response body');
   }
@@ -58,11 +63,29 @@ async function streamSseResponse(response: Response, onToken: (token: string) =>
       }
 
       try {
-        const parsed = JSON.parse(payload) as { token?: string; error?: string };
+        const parsed = JSON.parse(payload) as {
+          token?: string;
+          error?: string;
+          sources?: Array<{ title: string; url: string; published_at?: string; source?: string }>;
+          result?: {
+            answer?: string;
+            sources?: Array<{ title: string; url: string; published_at?: string; source?: string }>;
+          };
+        };
         if (parsed.error) throw new Error(parsed.error);
+        if (Array.isArray(parsed.sources) && onSources) {
+          onSources(parsed.sources);
+        }
         if (parsed.token) {
           fullText += parsed.token;
           onToken(parsed.token);
+        }
+        if (parsed.result?.answer && !fullText) {
+          fullText = parsed.result.answer;
+          onToken(parsed.result.answer);
+        }
+        if (Array.isArray(parsed.result?.sources) && onSources) {
+          onSources(parsed.result.sources);
         }
       } catch (error) {
         throw new Error(String((error as Error)?.message || error));
@@ -86,7 +109,7 @@ export async function streamAiChat(payload: AIChatPayload, options: StreamOption
     throw new Error(text || `AI API failed: ${response.status}`);
   }
 
-  return streamSseResponse(response, options.onToken);
+  return streamSseResponse(response, options.onToken, options.onSources);
 }
 
 export async function streamNewsSummary(
@@ -110,5 +133,5 @@ export async function streamNewsSummary(
     throw new Error(text || `AI summary API failed: ${response.status}`);
   }
 
-  return streamSseResponse(response, options.onToken);
+  return streamSseResponse(response, options.onToken, options.onSources);
 }

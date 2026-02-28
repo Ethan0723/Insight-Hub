@@ -2,6 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildContext, searchNewsRaw } from './news_search.mjs';
+import { generateDbOnlyAnswer, splitIntoStreamTokens } from './rag_chat.mjs';
 
 const PORT = Number(process.env.PORT || 8787);
 const MODEL = process.env.LLM_MODEL || 'bedrock-claude-4-5-sonnet';
@@ -131,48 +133,6 @@ function readJsonBody(req) {
   });
 }
 
-function buildChatPrompt(payload) {
-  const {
-    userQuestion,
-    baseline = 0,
-    delta = 0,
-    finalScore = 0,
-    exposureMatrix = [],
-    priorityRanking = []
-  } = payload;
-
-  return `
-你是跨境 SaaS 战略顾问。
-用户问题基于以下数据：
-
-- Baseline: ${baseline}
-- Delta: ${delta}
-- Final: ${finalScore}
-- 暴露矩阵: ${JSON.stringify(exposureMatrix)}
-- 优先级排序: ${JSON.stringify(priorityRanking)}
-
-要求：
-1. 给出自然语言战略判断
-2. 不编造数据
-3. 不重新计算分数
-4. 强调外部风险与内部敏感度关系
-5. 语气专业但不模板化
-
-输出结构：
-【战略判断】
-简洁 2-3 行结论
-
-【关键影响因素】
-条列 2-4 点
-
-【建议行动】
-条列 2-3 点
-
-用户问题：
-${userQuestion}
-`.trim();
-}
-
 function buildSummaryPrompt(payload) {
   const items = Array.isArray(payload?.newsItems) ? payload.newsItems.slice(0, 12) : [];
   const fallbackTitles = Array.isArray(payload?.newsTitles) ? payload.newsTitles.slice(0, 12) : [];
@@ -216,16 +176,24 @@ function parseUpstreamChunk(chunkText) {
   return tokens;
 }
 
-async function handleAiChat(req, res) {
-  if (!API_KEY) {
-    sendJson(res, 500, { error: 'LLM_API_KEY missing on server.' });
-    return;
-  }
+function startSse(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive'
+  });
+}
 
-  const body = await readJsonBody(req);
-  const mode = body?.task === 'news_summary' ? 'news_summary' : 'chat';
-  const prompt = mode === 'news_summary' ? buildSummaryPrompt(body) : buildChatPrompt(body);
+function emitSse(res, data) {
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
 
+function endSse(res) {
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
+async function streamNewsSummary(prompt, res) {
   const upstream = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -256,28 +224,97 @@ async function handleAiChat(req, res) {
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive'
-  });
-
+  startSse(res);
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-
     const chunk = decoder.decode(value, { stream: true });
     const tokens = parseUpstreamChunk(chunk);
     for (const token of tokens) {
-      res.write(`data: ${JSON.stringify({ token })}\n\n`);
+      emitSse(res, { token });
     }
   }
 
-  res.write('data: [DONE]\n\n');
-  res.end();
+  endSse(res);
+}
+
+async function streamDbOnlyChat(question, res) {
+  const docs = await searchNewsRaw(question, {
+    supabaseUrl: SUPABASE_URL,
+    supabaseServiceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+    days: 30,
+    limit: 8,
+    timeoutMs: 8000
+  });
+
+  const sources = docs.map((doc, idx) => ({
+    doc: idx + 1,
+    id: doc.id,
+    title: doc.title,
+    url: doc.url,
+    published_at: doc.published_at,
+    source: doc.source
+  }));
+
+  startSse(res);
+  emitSse(res, { sources });
+
+  if (docs.length === 0) {
+    const answer = '新闻库中未找到相关条目（最近30/180天），请换关键词或先补充RSS源。';
+    emitSse(res, { token: answer });
+    emitSse(res, { result: { answer, sources: [] } });
+    endSse(res);
+    return;
+  }
+
+  const context = buildContext(docs, 6000);
+  const answer = await generateDbOnlyAnswer({
+    question,
+    context,
+    apiUrl: API_URL,
+    apiKey: API_KEY,
+    model: MODEL,
+    timeoutMs: 45000
+  });
+
+  const tokens = splitIntoStreamTokens(answer, 72);
+  for (const token of tokens) {
+    emitSse(res, { token });
+  }
+  emitSse(res, { result: { answer, sources } });
+  endSse(res);
+}
+
+async function handleAiChat(req, res) {
+  if (!API_KEY) {
+    sendJson(res, 500, { error: 'LLM_API_KEY missing on server.' });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  const mode = body?.task === 'news_summary' ? 'news_summary' : 'chat';
+  if (mode === 'news_summary') {
+    const prompt = buildSummaryPrompt(body);
+    await streamNewsSummary(prompt, res);
+    return;
+  }
+
+  const question = String(body?.userQuestion || '').trim();
+  if (!question) {
+    sendJson(res, 400, { error: 'userQuestion is required' });
+    return;
+  }
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    sendJson(res, 500, {
+      error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on server for DB-only assistant.'
+    });
+    return;
+  }
+
+  await streamDbOnlyChat(question, res);
 }
 
 async function handleNewsRaw(req, res) {
