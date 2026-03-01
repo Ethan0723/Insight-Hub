@@ -13,6 +13,7 @@ import { mockNews } from '../data/mock/news';
 import { mockAssistant, mockDailyInsight, mockMatrix, mockModelExplainers } from '../data/mock/dashboard';
 import { calculateRevenueImpact } from '../data/mock/revenue';
 import { combineFinalScore } from './score';
+import { buildDailyBriefContext } from './brief-context';
 
 const delay = (ms = 220) => new Promise((resolve) => setTimeout(resolve, ms));
 const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
@@ -434,195 +435,119 @@ function truncate(text: string, length: number): string {
   return `${clean.slice(0, length)}…`;
 }
 
-const DIMENSION_CANONICAL: Record<string, 'subscription' | 'commission' | 'payment' | 'ecosystem'> = {
-  subscription: 'subscription',
-  '订阅': 'subscription',
-  '订阅收入': 'subscription',
-  commission: 'commission',
-  '佣金': 'commission',
-  '交易佣金': 'commission',
-  payment: 'payment',
-  '支付': 'payment',
-  '支付链路': 'payment',
-  ecosystem: 'ecosystem',
-  '生态': 'ecosystem',
-  '生态与渠道': 'ecosystem'
+const DIMENSION_LABELS: Record<string, string> = {
+  订阅: '订阅',
+  佣金: '佣金',
+  支付: '支付',
+  生态: '生态',
+  subscription: '订阅',
+  commission: '佣金',
+  payment: '支付',
+  ecosystem: '生态'
 };
 
-const DIMENSION_LABEL: Record<'subscription' | 'commission' | 'payment' | 'ecosystem', string> = {
-  subscription: '订阅收入',
-  commission: '交易佣金',
-  payment: '支付链路',
-  ecosystem: '生态与渠道'
-};
-
-function normalizeDimension(value?: string): 'subscription' | 'commission' | 'payment' | 'ecosystem' {
-  if (!value) return 'ecosystem';
-  const key = value.trim();
-  const lower = key.toLowerCase();
-  if (DIMENSION_CANONICAL[lower]) return DIMENSION_CANONICAL[lower];
-  if (DIMENSION_CANONICAL[key]) return DIMENSION_CANONICAL[key];
-  return 'ecosystem';
+function toUtc8DateKey(timestamp: number) {
+  return new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function buildDailyStrategyBrief(news: NewsItem[]) {
-  const now = Date.now();
-  const windowMs = 72 * 60 * 60 * 1000;
-  const threshold = now - windowMs;
-
-  const filtered = [...news]
-    .map((item) => {
-      const timeValue = Date.parse(item.createdAt || item.publishDate || '') || 0;
-      return { item, timeValue };
+  const todayKey = toUtc8DateKey(Date.now());
+  const todayNews = news
+    .filter((item) => {
+      const created = Date.parse(item.createdAt || item.publishDate || '') || 0;
+      return toUtc8DateKey(created) === todayKey;
     })
-    .filter((entry) => entry.timeValue >= threshold)
-    .filter(({ item }) => !isLowConfidenceInsight(item))
-    .sort((a, b) => b.timeValue - a.timeValue);
-
-  const scanned = filtered.slice(0, 100);
-  const candidateItems = scanned
-    .map(({ item }) => item)
-    .filter((item) => (Number.isFinite(item.impactScore) ? item.impactScore : 0) >= 60);
+    .filter((item) => !isLowConfidenceInsight(item))
+    .sort((a, b) => {
+      const impactDiff = (b.impactScore || 0) - (a.impactScore || 0);
+      if (impactDiff !== 0) return impactDiff;
+      const riskOrder = { 高: 3, 中: 2, 低: 1 };
+      return (riskOrder[b.riskLevel] || 1) - (riskOrder[a.riskLevel] || 1);
+    })
+    .slice(0, 30);
 
   const meta = {
-    news_count_scanned: scanned.length,
-    news_count_used: candidateItems.length,
-    generated_at: new Date().toISOString()
-  };
+    news_count_scanned: todayNews.length,
+    news_count_used: todayNews.length,
+    generated_at: new Date().toISOString(),
+    data_source: 'news_raw'
+  } as StrategyBrief['meta'] & { data_source: string };
 
-  if (!candidateItems.length) {
-    console.log(
-      `[策略概览] 扫描 ${meta.news_count_scanned} 条，使用 0 条，主维度 无，状态 风险平稳`
-    );
+  if (!todayNews.length) {
     return {
-      headline: '近72小时未出现高强度风险信号',
-      time_window: '近72小时',
-      top_signals: [],
+      headline: '今日未找到高影响信号触发独立站SaaS判断',
+      time_window: '今天',
+      top_drivers: [],
       top_news: [],
       actions: [
-        {
-          priority: 'P1',
-          owner: '战略',
-          action: '继续监控关键维度'
-        }
+        { priority: 'P0', owner: '战略', action: '继续监控今日新闻', expected_effect: '保持预警', time_horizon: '本周' },
+        { priority: 'P1', owner: '产品', action: '确认监控指标正常', expected_effect: '保障可预期', time_horizon: '本月' },
+        { priority: 'P2', owner: '商业化', action: '向客户说明我们持续观察', expected_effect: '增强信心', time_horizon: '本季度' }
       ],
       meta
     };
   }
 
-  const dimensionBuckets = new Map<
-    'subscription' | 'commission' | 'payment' | 'ecosystem',
-    {
-      key: 'subscription' | 'commission' | 'payment' | 'ecosystem';
-      label: string;
-      count: number;
-      highRiskCount: number;
-      totalImpact: number;
-      items: NewsItem[];
-    }
-  >();
-
-  candidateItems.forEach((item) => {
-    const dimensionValue = item.impactDimensions?.[0] || item.moduleTags?.[0] || '生态';
-    const canonical = normalizeDimension(dimensionValue);
-    const bucket = dimensionBuckets.get(canonical) || {
-      key: canonical,
-      label: DIMENSION_LABEL[canonical],
-      count: 0,
-      highRiskCount: 0,
-      totalImpact: 0,
-      items: []
-    };
-    const impact = Number.isFinite(item.impactScore) ? item.impactScore : 0;
-    bucket.count += 1;
-    bucket.totalImpact += impact;
-    if (item.riskLevel === '高') bucket.highRiskCount += 1;
-    bucket.items.push(item);
-    dimensionBuckets.set(canonical, bucket);
+  const dimensionCount: Record<string, number> = {};
+  todayNews.forEach((item) => {
+    const key = (item.impactDimensions?.[0] || item.moduleTags?.[0] || '生态') as string;
+    const label = DIMENSION_LABELS[key] || '生态';
+    dimensionCount[label] = (dimensionCount[label] || 0) + 1;
   });
+  const mainDimension = Object.keys(dimensionCount).sort((a, b) => dimensionCount[b] - dimensionCount[a])[0] || '生态';
+  const hasHighRisk = todayNews.some((item) => item.riskLevel === '高');
+  const headline = `${mainDimension}波动${hasHighRisk ? '负面' : '温和'}影响独立站SaaS${hasHighRisk ? '转化/成本' : '增长/稳定'}表现`;
 
-  const bucketArray = Array.from(dimensionBuckets.values()).sort((a, b) => {
-    if (b.highRiskCount !== a.highRiskCount) return b.highRiskCount - a.highRiskCount;
-    const aAvg = a.count ? a.totalImpact / a.count : 0;
-    const bAvg = b.count ? b.totalImpact / b.count : 0;
-    return bAvg - aAvg;
-  });
-
-  const mainBucket = bucketArray[0];
-  const mainLabel = mainBucket?.label || '跨境电商核心链路';
-  const riskState = mainBucket
-    ? mainBucket.highRiskCount >= 2
-      ? '风险抬升'
-      : mainBucket.highRiskCount === 1
-      ? '单点扰动'
-      : '风险平稳'
-    : '风险平稳';
-
-  const headline =
-    riskState === '风险抬升'
-      ? `${mainLabel} 风险集中抬升，需关注结构性影响`
-      : riskState === '单点扰动'
-      ? `${mainLabel} 出现单点风险信号，短期需观察`
-      : '跨境电商核心链路风险整体平稳';
-
-  const sortedNews = [...candidateItems].sort((a, b) => {
-    const impactA = Number.isFinite(a.impactScore) ? a.impactScore : 0;
-    const impactB = Number.isFinite(b.impactScore) ? b.impactScore : 0;
-    if (impactB !== impactA) return impactB - impactA;
-    const timeA = Date.parse(a.createdAt || a.publishDate || '') || 0;
-    const timeB = Date.parse(b.createdAt || b.publishDate || '') || 0;
-    return timeB - timeA;
-  });
-
-  const topNews = sortedNews.slice(0, 6).map((item) => ({
-    id: item.id,
-    title: truncate(item.title || item.aiTldr || 'Untitled', 60),
-    url: item.originalUrl || item.url || '',
+  const topDrivers = todayNews.slice(0, 5).map((item) => ({
+    title: item.title || '标题缺失',
     source: item.source || '未知来源',
     impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
     risk_level: item.riskLevel || '中',
-    why_used: truncate(item.summary || item.aiTldr || '来自高影响新闻', 50),
-    dimension: item.impactDimensions?.[0] || item.moduleTags?.[0] || DIMENSION_LABEL['ecosystem']
+    why: truncate(item.summary || item.aiTldr || '无摘要', 80)
   }));
 
-  const topSignals = bucketArray.slice(0, 4).map((bucket) => {
-    const avgImpact = bucket.count ? Math.round(bucket.totalImpact / bucket.count) : 0;
-    const summary = bucket.highRiskCount
-      ? `高风险 ${bucket.highRiskCount} 条，平均评分 ${avgImpact}`
-      : `共 ${bucket.count} 条，平均评分 ${avgImpact}`;
-    return {
-      dimension: bucket.label,
-      score: avgImpact,
-      high_risk_count: bucket.highRiskCount,
-      summary
-    };
-  });
+  const topNews = topDrivers.map((driver, index) => ({
+    id: todayNews[index]?.id || '',
+    title: driver.title,
+    source: driver.source,
+    url: todayNews[index]?.originalUrl || todayNews[index]?.url || '',
+    impact_score: driver.impact_score,
+    risk_level: driver.risk_level,
+    matched_keywords: todayNews[index]?.moduleTags || []
+  }));
 
-  const actions: StrategyAction[] = [];
-  if (mainBucket) {
-    const p0Action =
-      riskState === '风险抬升'
-        ? `立刻复盘${mainLabel}风险并评估结构性影响`
-        : riskState === '单点扰动'
-        ? `紧盯${mainLabel}单点风险变化`
-        : `保持${mainLabel}风险常规巡检`;
-    const p1Action = `检视${mainLabel}相关能力支撑`; // <=40
-    const p2Action = `准备${mainLabel}方面的客户沟通`; // <=40
-    actions.push({ priority: 'P0', owner: '战略', action: truncate(p0Action, 40) });
-    actions.push({ priority: 'P1', owner: '产品', action: truncate(p1Action, 40) });
-    actions.push({ priority: 'P2', owner: '商业化', action: truncate(p2Action, 40) });
-  }
+  const revenueImpact = {
+    subscription: { direction: '↓', note: '订阅续费面临成本/转化压力' },
+    commission: { direction: '↓', note: '佣金被关税/支付波动侵蚀' },
+    payment: { direction: '→', note: '支付链路需维稳' },
+    ecosystem: { direction: '→', note: '生态维持信任' }
+  };
 
-  console.log(
-    `[策略概览] 扫描 ${meta.news_count_scanned} 条，使用 ${meta.news_count_used} 条，主维度 ${mainLabel}，状态 ${riskState}`
-  );
+  const actions: StrategyAction[] = [
+    { priority: 'P0', owner: '战略', action: `${mainDimension}策略回顾并同步客户`, expected_effect: '稳定收入', time_horizon: '本周' },
+    { priority: 'P1', owner: '产品', action: `优化${mainDimension}相关能力（例：支付/风控）`, expected_effect: '提升可靠性', time_horizon: '本月' },
+    { priority: 'P2', owner: '商业化', action: `用${mainDimension}洞察丰富客户沟通`, expected_effect: '巩固信任', time_horizon: '本季度' }
+  ];
+
+  const citations = todayNews.slice(0, 6).map((item) => ({
+    id: item.id,
+    title: item.title,
+    source: item.source || '未知来源',
+    url: item.originalUrl || item.url || '',
+    published_at: item.publishDate || item.createdAt || '',
+    impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
+    risk_level: item.riskLevel || '中',
+    matched_keywords: item.moduleTags || []
+  }));
 
   return {
     headline,
-    time_window: '近72小时',
-    top_signals: topSignals,
+    time_window: '今天',
+    top_drivers: topDrivers,
     top_news: topNews,
-    actions: actions.slice(0, 3),
+    actions,
+    impact_on_revenue_model: revenueImpact,
+    citations,
     meta
   };
 }

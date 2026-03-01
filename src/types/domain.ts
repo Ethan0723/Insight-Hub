@@ -75,39 +75,48 @@ export interface ReasoningNode {
   evidence: EvidenceLink;
 }
 
-export interface StrategySignal {
-  dimension: string;
-  score: number;
-  high_risk_count: number;
-  summary: string;
+export interface StrategyDriver {
+  title: string;
+  source: string;
+  impact_score: number;
+  risk_level: '低' | '中' | '高';
+  why: string;
 }
 
 export interface StrategyNews {
   id: NewsId;
   title: string;
-  url: string;
   source: string;
+  url: string;
   impact_score: number;
   risk_level: '低' | '中' | '高';
-  why_used: string;
+  matched_keywords: string[];
 }
 
 export interface StrategyAction {
   priority: 'P0' | 'P1' | 'P2';
   owner: '战略' | '产品' | '商业化';
   action: string;
+  expected_effect?: string;
+  time_horizon?: '本周' | '本月' | '本季度';
 }
 
 export interface StrategyBrief {
   headline: string;
   time_window: string;
-  top_signals: StrategySignal[];
+  top_drivers: StrategyDriver[];
   top_news: StrategyNews[];
   actions: StrategyAction[];
   meta: {
     news_count_scanned: number;
     news_count_used: number;
     generated_at: string;
+  };
+  impact_on_revenue_model?: {
+    subscription: { direction: '↑' | '↓' | '→'; note: string };
+    commission: { direction: '↑' | '↓' | '→'; note: string };
+    payment: { direction: '↑' | '↓' | '→'; note: string };
+    ecosystem: { direction: '↑' | '↓' | '→'; note: string };
   };
 }
 
