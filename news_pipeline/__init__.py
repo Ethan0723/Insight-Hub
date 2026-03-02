@@ -8,6 +8,7 @@ __all__ = [
     "config",
     "fetcher",
     "ai_client",
+    "daily_brief",
     "supabase_client",
     "processor",
 ]
