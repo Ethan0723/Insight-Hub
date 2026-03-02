@@ -72,6 +72,29 @@ function toNumberedItems(text) {
   const raw = String(text || '').trim();
   if (!raw) return [];
 
+  const normalizeChunks = (chunks) => {
+    const refined = [];
+    chunks.forEach((chunk) => {
+      const parts = String(chunk || '')
+        .split(/[，,]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length === 0) return;
+      if (parts.length === 1) {
+        refined.push(parts[0]);
+        return;
+      }
+      parts.forEach((part) => {
+        if (refined.length > 0 && part.length < 8) {
+          refined[refined.length - 1] = `${refined[refined.length - 1]}，${part}`;
+        } else {
+          refined.push(part);
+        }
+      });
+    });
+    return refined.filter(Boolean);
+  };
+
   const numbered = raw
     .replace(/\r/g, '')
     .replace(/\n+/g, ' ')
@@ -83,14 +106,24 @@ function toNumberedItems(text) {
     .filter(Boolean);
 
   if (numbered.length > 0) {
-    return numbered.slice(0, 6);
+    const expanded = normalizeChunks(
+      numbered.flatMap((item) =>
+        item
+          .split(/[；;。]/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+      )
+    );
+    return (expanded.length > 0 ? expanded : numbered).slice(0, 6);
   }
 
-  return raw
-    .split(/[。；;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 6);
+  const expanded = normalizeChunks(
+    raw
+      .split(/[。；;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+  return expanded.slice(0, 6);
 }
 
 function formatExecutiveSummaryText(text) {
