@@ -6,6 +6,7 @@ import {
   NewsQuery,
   PagedResult,
   ScoreBreakdown,
+  StrategyBrief,
   RevenueImpactResult,
   RevenueScenario
 } from '../types/domain';
@@ -22,6 +23,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
+const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
 let runtimeDataSource: 'supabase_direct' | 'server_proxy' | 'mock' = 'mock';
@@ -258,6 +260,11 @@ function safeParseJson(value: string): any {
   }
 }
 
+function safeParseJsonValue(value: unknown): any {
+  if (typeof value === 'string') return safeParseJson(value);
+  return value;
+}
+
 function pickChineseText(candidates: Array<string | undefined>, fallback: string): string {
   const cleaned = candidates
     .map((t) => String(t || '').trim())
@@ -331,6 +338,163 @@ function filterNews(list: NewsItem[], query: NewsQuery = {}): NewsItem[] {
 
 function hasSupabaseConfig(): boolean {
   return Boolean(USE_SUPABASE && SUPABASE_URL && SUPABASE_ANON_KEY);
+}
+
+function toUtc8WindowLabel(dayKey: string): string {
+  return `${dayKey} (UTC+8)`;
+}
+
+async function fetchDailyBriefRows(dateKey: string): Promise<any[]> {
+  if (hasSupabaseConfig()) {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/daily_brief`);
+    url.searchParams.set(
+      'select',
+      'id,brief_date,brief_tz,window_start,window_end,headline,one_liner,top_drivers,impacts,actions,citations,stats,model,prompt_version,usage,generated_at'
+    );
+    url.searchParams.set('brief_date', `eq.${dateKey}`);
+    if (DAILY_BRIEF_PROMPT_VERSION) {
+      url.searchParams.set('prompt_version', `eq.${DAILY_BRIEF_PROMPT_VERSION}`);
+    }
+    url.searchParams.set('order', 'generated_at.desc');
+    url.searchParams.set('limit', '1');
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+      }
+    });
+    if (!res.ok) throw new Error(`daily_brief supabase http ${res.status}`);
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  const url = new URL('/api/daily_brief', window.location.origin);
+  url.searchParams.set('date', dateKey);
+  if (DAILY_BRIEF_PROMPT_VERSION) {
+    url.searchParams.set('prompt_version', DAILY_BRIEF_PROMPT_VERSION);
+  }
+  const res = await fetch(`${url.pathname}${url.search}`);
+  if (!res.ok) throw new Error(`daily_brief proxy http ${res.status}`);
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
+function toDailyBriefCitation(value: unknown, newsMap: Map<string, NewsItem>, idx: number) {
+  const key = String(value || '').trim();
+  if (!key) return null;
+  const isUrl = /^https?:\/\//i.test(key);
+  const news = newsMap.get(key);
+  if (news) {
+    return {
+      id: news.id,
+      title: news.title,
+      source: news.source,
+      url: news.originalUrl,
+      published_at: news.createdAt || '',
+      impact_score: news.impactScore,
+      risk_level: news.riskLevel,
+      matched_keywords: []
+    };
+  }
+  return {
+    id: `brief-${idx}`,
+    title: isUrl ? `外部引用 ${idx + 1}` : key,
+    source: 'daily_brief',
+    url: isUrl ? key : '#',
+    published_at: '',
+    impact_score: 0,
+    risk_level: '中' as const,
+    matched_keywords: []
+  };
+}
+
+function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief | null {
+  if (!row || typeof row !== 'object') return null;
+  const headline = String(row.headline || '').trim();
+  const oneLiner = String(row.one_liner || '').trim();
+  if (!headline || !oneLiner) return null;
+
+  const topDriversRaw = safeParseJsonValue(row.top_drivers);
+  const impacts = safeParseJsonValue(row.impacts) || {};
+  const actionsRaw = safeParseJsonValue(row.actions);
+  const citationsRaw = safeParseJsonValue(row.citations);
+  const statsRaw = safeParseJsonValue(row.stats);
+
+  const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any) => ({
+    title: String(driver?.title || '外部变化').trim(),
+    source: 'LLM综合',
+    impact_score: 0,
+    risk_level: '中' as const,
+    why: String(driver?.why_it_matters || '').trim() || '该信号将影响近期经营决策。'
+  }));
+
+  const actions = (Array.isArray(actionsRaw) ? actionsRaw : [])
+    .filter((item: any) => ['P0', 'P1', 'P2'].includes(String(item?.priority || '')))
+    .slice(0, 6)
+    .map((action: any) => ({
+      priority: action.priority,
+      owner: ['战略', '产品', '商业化'].includes(String(action.owner || '')) ? action.owner : '战略',
+      action: String(action.action || '').trim() || '补充行动方案',
+      expected_effect: String(action.success_metric || '').trim(),
+      time_horizon: String(action.timeframe || '').trim()
+    }));
+
+  const newsMap = new Map<string, NewsItem>();
+  news.forEach((item) => {
+    newsMap.set(String(item.id), item);
+    newsMap.set(String(item.originalUrl), item);
+  });
+
+  const citations = (Array.isArray(citationsRaw) ? citationsRaw : [])
+    .slice(0, 10)
+    .map((value: unknown, idx: number) => toDailyBriefCitation(value, newsMap, idx))
+    .filter(Boolean) as NonNullable<StrategyBrief['citations']>;
+
+  return {
+    headline,
+    one_liner: oneLiner,
+    time_window: toUtc8WindowLabel(String(row.brief_date || utc8TodayKey())),
+    signal_case: 'A',
+    top_drivers: topDrivers,
+    top_news: citations.slice(0, 5).map((item) => ({
+      id: item.id,
+      title: item.title,
+      source: item.source,
+      url: item.url,
+      impact_score: item.impact_score,
+      risk_level: item.risk_level,
+      matched_keywords: item.matched_keywords || []
+    })),
+    citations,
+    impacts: {
+      merchant_demand: String(impacts.merchant_demand || '').trim(),
+      acquisition: String(impacts.acquisition || '').trim(),
+      conversion: String(impacts.conversion || '').trim(),
+      payments_risk: String(impacts.payments_risk || '').trim(),
+      fulfillment: String(impacts.fulfillment || '').trim(),
+      competition: String(impacts.competition || '').trim()
+    },
+    actions,
+    transmission_analysis: {
+      macro: '已由 LLM 基于当日 news_raw 聚合生成。',
+      industry: '重点围绕跨境履约、支付与竞争格局变化。',
+      saas: '输出公司级结论与行动建议供决策使用。'
+    },
+    impact_on_revenue_model: {
+      subscription: { direction: '→', note: '由 daily_brief 提供结构化结论' },
+      commission: { direction: '→', note: '由 daily_brief 提供结构化结论' },
+      payment: { direction: '→', note: '由 daily_brief 提供结构化结论' },
+      ecosystem: { direction: '→', note: '由 daily_brief 提供结构化结论' }
+    },
+    meta: {
+      news_count_scanned: Number(statsRaw?.scanned || 0),
+      news_count_used: Number(statsRaw?.used || 0),
+      generated_at: String(row.generated_at || ''),
+      only_news_raw: true,
+      brief_source: 'daily_brief'
+    }
+  };
 }
 
 async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
@@ -897,6 +1061,18 @@ async function getRealOrMockNews(force = false): Promise<NewsItem[]> {
   }
 }
 
+async function getDailyBriefFromData(news: NewsItem[], date?: string): Promise<StrategyBrief | null> {
+  const dayKey = (date || utc8TodayKey()).slice(0, 10);
+  try {
+    const rows = await fetchDailyBriefRows(dayKey);
+    if (!rows.length) return null;
+    return mapDailyBriefToStrategyBrief(rows[0], news);
+  } catch (err) {
+    console.warn('[api] daily_brief unavailable, fallback to rule-based brief.', err);
+    return null;
+  }
+}
+
 export const api = {
   async getNews(query: NewsQuery = {}): Promise<PagedResult<NewsItem>> {
     await delay();
@@ -933,7 +1109,24 @@ export const api = {
 
   async getDailyInsight(): Promise<DailyInsight> {
     await delay(180);
-    return buildDailyInsight(await getRealOrMockNews());
+    const news = await getRealOrMockNews();
+    const fallback = buildDailyInsight(news);
+    const brief = await getDailyBriefFromData(news);
+    if (!brief) return fallback;
+    return {
+      ...fallback,
+      brief: brief.headline,
+      strategyBrief: brief,
+      updatedAt: brief.meta.generated_at
+        ? new Date(brief.meta.generated_at).toLocaleString('zh-CN', { hour12: false })
+        : fallback.updatedAt
+    };
+  },
+
+  async getDailyBrief(date?: string): Promise<StrategyBrief | null> {
+    await delay(130);
+    const news = await getRealOrMockNews();
+    return getDailyBriefFromData(news, date);
   },
 
   async getMatrix(): Promise<MatrixRow[]> {

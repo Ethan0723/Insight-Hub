@@ -348,10 +348,50 @@ async function handleNewsRaw(req, res) {
   res.end(text);
 }
 
+async function handleDailyBrief(req, res, requestUrl) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    sendJson(res, 500, { error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on server.' });
+    return;
+  }
+
+  const date = String(requestUrl.searchParams.get('date') || '').trim();
+  const promptVersion = String(requestUrl.searchParams.get('prompt_version') || '').trim();
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/daily_brief`);
+  upstreamUrl.searchParams.set(
+    'select',
+    'id,brief_date,brief_tz,window_start,window_end,headline,one_liner,top_drivers,impacts,actions,citations,stats,model,prompt_version,usage,generated_at'
+  );
+  if (date) {
+    upstreamUrl.searchParams.set('brief_date', `eq.${date}`);
+  }
+  if (promptVersion) {
+    upstreamUrl.searchParams.set('prompt_version', `eq.${promptVersion}`);
+  }
+  upstreamUrl.searchParams.set('order', 'generated_at.desc');
+  upstreamUrl.searchParams.set('limit', '1');
+
+  const upstream = await fetch(upstreamUrl.toString(), {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    sendJson(res, upstream.status || 502, { error: text || 'Supabase request failed' });
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(text);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const { method = 'GET', url = '/' } = req;
-    const { pathname = '/' } = new URL(url, `http://${req.headers.host || 'localhost'}`);
+    const requestUrl = new URL(url, `http://${req.headers.host || 'localhost'}`);
+    const { pathname = '/' } = requestUrl;
     const allowOrigin = resolveAllowedOrigin(req);
     res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Vary', 'Origin');
@@ -376,6 +416,11 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && pathname === '/api/news_raw') {
       await handleNewsRaw(req, res);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/daily_brief') {
+      await handleDailyBrief(req, res, requestUrl);
       return;
     }
 
