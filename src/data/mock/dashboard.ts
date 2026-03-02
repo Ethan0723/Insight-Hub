@@ -143,10 +143,10 @@ export const mockMatrix: MatrixRow[] = [
 ];
 
 export const mockModelExplainers = [
-  { title: '情报结构化标签抽取', text: '将原始新闻映射为平台、区域、风险、收入维度与证据权重。' },
-  { title: '多维影响评分算法', text: '结合事件强度、覆盖范围、时效性与历史弹性得到影响评分。' },
-  { title: '战略指数计算逻辑', text: '按主题分桶并依据证据权重聚合为五大战略指数。' },
-  { title: '收入模型映射规则', text: '将事件映射到订阅/佣金/支付/生态四条收入路径并给出动作优先级。' }
+  { title: '数据链路（news_raw → daily_brief）', text: '先抓取并写入 news_raw，再生成 daily_brief；前端优先读取 daily_brief，当日缺失时回退规则引擎。' },
+  { title: '公司级结论生成', text: 'daily_brief 基于当日新闻窗口聚合为 headline/驱动/影响/行动，并保留 citations 与 stats 供审计追溯。' },
+  { title: '时效策略', text: 'news pipeline 定时运行并串行执行，保证 daily_brief 依赖 news_raw 完成后再生成，降低数据竞态与延迟。' },
+  { title: '收入沙盘口径', text: '收入影响沙盘采用 Baseline + Delta 口径：外部信号给 Baseline，参数模拟给 Delta，Final 用于决策优先级。' }
 ];
 
 export const mockAssistant = {
