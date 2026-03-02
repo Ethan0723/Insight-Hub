@@ -4,12 +4,11 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from .ai_client import generate_json_object
 from .supabase_client import fetch_news_raw_for_daily_brief, upsert_daily_brief
 
-UTC8 = ZoneInfo("Asia/Shanghai")
+UTC8 = timezone(timedelta(hours=8))
 PROMPT_VERSION = os.getenv("DAILY_BRIEF_PROMPT_VERSION", "v1")
 DAILY_BRIEF_TZ = os.getenv("DAILY_BRIEF_TZ", "Asia/Shanghai")
 MAX_NEWS = int(os.getenv("DAILY_BRIEF_MAX_NEWS", "50"))
