@@ -409,9 +409,28 @@ function toDailyBriefCitation(value: unknown, newsMap: Map<string, NewsItem>, id
   };
 }
 
+function hasCjk(text: string): boolean {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
+function isEnglishHeavy(text: string): boolean {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  const latin = (s.match(/[A-Za-z]/g) || []).length;
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+  return latin >= 12 && cjk <= 8;
+}
+
+function chineseOrFallback(text: string, fallback: string): string {
+  const cleaned = String(text || '').trim();
+  if (!cleaned) return fallback;
+  if (isEnglishHeavy(cleaned) && !hasCjk(cleaned)) return fallback;
+  return cleaned;
+}
+
 function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief | null {
   if (!row || typeof row !== 'object') return null;
-  const headline = String(row.headline || '').trim();
+  const headline = chineseOrFallback(String(row.headline || ''), '外部信号分散，先执行最小可逆策略');
   const oneLiner = String(row.one_liner || '').trim();
   if (!headline || !oneLiner) return null;
 
@@ -422,11 +441,11 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
   const statsRaw = safeParseJsonValue(row.stats);
 
   const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any) => ({
-    title: String(driver?.title || '外部变化').trim(),
+    title: chineseOrFallback(String(driver?.title || ''), '外部信号变化'),
     source: 'LLM综合',
     impact_score: 0,
     risk_level: '中' as const,
-    why: String(driver?.why_it_matters || '').trim() || '该信号将影响近期经营决策。'
+    why: chineseOrFallback(String(driver?.why_it_matters || ''), '该信号将影响近期经营决策。')
   }));
 
   const actions = (Array.isArray(actionsRaw) ? actionsRaw : [])
