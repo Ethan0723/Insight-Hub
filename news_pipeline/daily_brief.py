@@ -62,6 +62,28 @@ def _strip_disallowed_terms(text: str) -> str:
     return cleaned.strip("，。；：:,. ")
 
 
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(text or ""))
+
+
+def _is_english_heavy(text: str) -> bool:
+    s = str(text or "")
+    if not s.strip():
+        return False
+    latin = sum(1 for ch in s if ("a" <= ch.lower() <= "z"))
+    cjk = sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+    return latin >= 12 and cjk <= 8
+
+
+def _cn_or_fallback(text: str, fallback: str) -> str:
+    cleaned = _strip_disallowed_terms(_normalize_text(text))
+    if not cleaned:
+        return fallback
+    if _is_english_heavy(cleaned) and not _has_cjk(cleaned):
+        return fallback
+    return cleaned
+
+
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
     tags: list[str] = []
 
@@ -272,7 +294,10 @@ def _normalize_brief(
     scanned: int,
     low_sample: bool,
 ) -> dict[str, Any]:
-    headline = _strip_disallowed_terms(_normalize_text(raw.get("headline"))) or "外部信号分散，执行最小可逆策略并加密验证"
+    headline = _cn_or_fallback(
+        _normalize_text(raw.get("headline")),
+        "外部信号分散，执行最小可逆策略并加密验证",
+    )
     one_liner = _strip_disallowed_terms(_normalize_text(raw.get("one_liner"))) or "外部冲击尚不集中，先以低成本动作验证需求、支付和履约关键指标。"
 
     top_drivers: list[dict[str, Any]] = []
@@ -282,9 +307,14 @@ def _normalize_brief(
                 continue
             top_drivers.append(
                 {
-                    "title": _strip_disallowed_terms(_normalize_text(item.get("title"))) or "外部信号变化",
-                    "why_it_matters": _strip_disallowed_terms(_normalize_text(item.get("why_it_matters")))
-                    or "该信号会影响商家投入节奏，需要先做小规模验证并保留可逆动作。",
+                    "title": _cn_or_fallback(
+                        _normalize_text(item.get("title")),
+                        f"外部信号变化{len(top_drivers) + 1}",
+                    ),
+                    "why_it_matters": _cn_or_fallback(
+                        _normalize_text(item.get("why_it_matters")),
+                        "该信号会影响商家投入节奏，需要先做小规模验证并保留可逆动作。",
+                    ),
                     "signals": _clean_citations(item.get("signals"), input_news)[:3],
                 }
             )
@@ -293,9 +323,11 @@ def _normalize_brief(
         for item in input_news[:3]:
             top_drivers.append(
                 {
-                    "title": _strip_disallowed_terms(_normalize_text(item.get("title"))) or "行业信号变化",
-                    "why_it_matters": _strip_disallowed_terms(_normalize_text(item.get("summary")))
-                    or "暂无集中冲击，先监测核心指标并执行最小可逆动作。",
+                    "title": _cn_or_fallback(_normalize_text(item.get("title")), f"行业信号变化{len(top_drivers) + 1}"),
+                    "why_it_matters": _cn_or_fallback(
+                        _normalize_text(item.get("summary")),
+                        "暂无集中冲击，先监测核心指标并执行最小可逆动作。",
+                    ),
                     "signals": _clean_citations([item.get("id") or item.get("url")], input_news)[:1],
                 }
             )
