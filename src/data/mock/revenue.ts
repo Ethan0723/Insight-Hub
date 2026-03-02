@@ -9,7 +9,8 @@ export function calculateRevenueImpact(scenario: RevenueScenario): RevenueImpact
   const totalFactor = arpuFactor + commissionFactor + payFactor;
   const subscriptionDelta = scenario.arpuDelta * 20;
   const commissionDelta = scenario.commissionDelta * 25;
-  const paymentDelta = scenario.paymentSuccessDelta * 20;
+  // Payment success is a risk mitigator in the sandbox: higher success should reduce risk score.
+  const paymentDelta = -scenario.paymentSuccessDelta * 20;
   const ecosystemDelta = totalFactor * 10;
 
   const gmv = `${(totalFactor * 1.9).toFixed(1)}%`;
