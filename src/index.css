@@ -32,6 +32,28 @@ body {
   background: rgba(100, 116, 139, 0.45);
 }
 
+.strategic-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+}
+
+.strategic-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.strategic-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.strategic-scroll::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.28);
+}
+
+.strategic-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;
