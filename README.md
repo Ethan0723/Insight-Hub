@@ -49,6 +49,12 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - Baseline 来自外部态势，Delta 来自策略参数模拟
 - 暴露指数用于优先级排序（P0/P1/P2/P3）
 
+### 2.5 数据分析埋点（GA）
+- 已接入 Google Analytics 4（GA4）
+- 前端启动时自动初始化 `gtag` 并上报基础访问行为（页面访问/会话）
+- 支持通过 `VITE_GA_ID` 切换到正式 Measurement ID
+- 可作为比赛“可量化运营闭环”能力：支持后续补充关键事件（如 AI 助手提问、查看证据、行动板点击）
+
 ---
 
 ## 3. 技术架构
@@ -181,6 +187,7 @@ python -m news_pipeline.daily_brief
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_USE_SUPABASE`
 - `VITE_SUPABASE_NEWS_LIMIT`
+- `VITE_GA_ID`（GA4 Measurement ID，默认 `G-Z3L1ZHWP09`）
 - `VITE_AI_API_BASE`（前后端分域部署时必填）
 
 ### 8.2 Node 服务
