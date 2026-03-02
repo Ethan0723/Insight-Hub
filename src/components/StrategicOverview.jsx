@@ -11,6 +11,10 @@ function sanitizeTechPhrase(text) {
   return String(text || "")
     .replace(/由\s*daily_brief\s*提供结构化结论/g, "")
     .replace(/仅基于\s*news_raw/g, "")
+    .replace(/样本少[（(].*?[）)][:：]?\s*/g, "")
+    .replace(/样本少/g, "")
+    .replace(/无关业务/g, "")
+    .replace(/需观察/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -91,9 +95,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const actions = useMemo(() => buildPriorityActions(brief), [brief]);
   const citations = useMemo(() => (Array.isArray(brief?.citations) ? brief.citations : []), [brief]);
 
-  const coverageText = typeof brief?.meta?.direct_signal_count === "number"
-    ? `数据覆盖：${brief?.meta?.news_count_scanned || 0} 条（业务相关：${brief.meta.direct_signal_count}）`
-    : `数据覆盖：${brief?.meta?.news_count_scanned || 0} 条`;
+  const coverageText = `数据覆盖：${brief?.meta?.news_count_scanned || 0} | 命中：${brief?.meta?.news_count_used || 0} | 高影响：${brief?.meta?.high_impact || 0}`;
 
   const sourceText = brief?.meta?.brief_source === "daily_brief"
     ? "来源：news_raw + daily_brief"
@@ -116,7 +118,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
           <div className="flex items-start gap-1.5 md:flex-col md:items-end">
             <span className="group relative rounded-full border border-slate-700/90 bg-slate-900/85 px-2 py-0.5 text-[10px] text-slate-300 cursor-default">
               {coverageText}
-              <span className="strategic-tooltip">业务相关用于提示样本命中质量，仅作阅读参考。</span>
+              <span className="strategic-tooltip">命中=被用于生成结论的新闻条数；数据覆盖=当天扫描条数。</span>
             </span>
             <span className="text-[10px] text-slate-500">{sourceText}</span>
             <span className="text-[10px] text-slate-500">{safeText(brief.time_window, "今天")} (UTC+8)</span>

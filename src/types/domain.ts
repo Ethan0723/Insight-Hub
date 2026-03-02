@@ -140,6 +140,7 @@ export interface StrategyBrief {
     macro_signal_count?: number;
     only_news_raw?: boolean;
     brief_source?: 'daily_brief' | 'rule_based';
+    high_impact?: number;
   };
   impact_on_revenue_model?: {
     subscription: { direction: '↑' | '↓' | '→'; note: string };

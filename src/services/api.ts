@@ -490,6 +490,7 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
     meta: {
       news_count_scanned: Number(statsRaw?.scanned || 0),
       news_count_used: Number(statsRaw?.used || 0),
+      high_impact: Number(statsRaw?.high_impact || 0),
       generated_at: String(row.generated_at || ''),
       only_news_raw: true,
       brief_source: 'daily_brief'
