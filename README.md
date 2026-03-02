@@ -35,7 +35,8 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 ### 2.2 新闻管道（news pipeline）
 - RSS/网页抓取 -> LLM结构化摘要 -> Supabase 写入 `news_raw`
 - `daily_brief` 依赖 `news_raw`，同一任务内串行执行（先 main 再 daily_brief）
-- GitHub Actions 定时运行（当前每小时 :10）
+- 生产调度：服务器 `systemd timer` 每 6 小时触发一次（UTC+8 的 00/06/12/18 点）
+- GitHub Actions 仅保留 `workflow_dispatch` 手动兜底，不承担定时任务
 
 ### 2.3 AI 助手
 - 示例问题：基于最新一条 `daily_brief` 生成三段式回答
@@ -65,13 +66,14 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 4. 无数据时回退规则引擎（`src/services/api.ts`）
 
 ### 3.3 调度与依赖
-见 `.github/workflows/news-pipeline.yml`：
-- 触发：`cron: '10 * * * *'`（每小时 :10）
-- 串行步骤：
+生产环境见服务器 `insight-news-pipeline.service/.timer`：
+- timer：`OnCalendar=*-*-* 00,06,12,18:00:00`（6 小时一次）
+- service：同一进程串行执行
   - `python -m news_pipeline.main`
   - `python -m news_pipeline.daily_brief`
 
-这保证了 `daily_brief` 不会在 `news_raw` 尚未完成时提前执行。
+这保证了 `daily_brief` 不会在 `news_raw` 尚未完成时提前执行。  
+GitHub Actions 的 `.github/workflows/news-pipeline.yml` 仅用于手动补跑（`workflow_dispatch`）。
 
 ---
 
@@ -95,7 +97,7 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 │   ├── supabase_client.py
 │   └── ...
 ├── .github/workflows/
-│   └── news-pipeline.yml        # 定时任务（main -> daily_brief）
+│   └── news-pipeline.yml        # 手动补跑（workflow_dispatch）
 ├── tests/
 ├── README_PIPELINE.md
 └── README.md
@@ -220,7 +222,7 @@ python -m news_pipeline.daily_brief
 ### 10.1 为什么新闻库有新新闻，但“AI 今日战略判断”稍后才更新？
 - 新闻库读的是 `news_raw`（准实时）
 - 战略判断读的是 `daily_brief`（批处理快照）
-- 当前调度每小时一次，通常会有“分钟级~1小时”更新延迟
+- 当前生产调度每 6 小时一次，通常会有“分钟级~6小时”更新延迟
 
 ### 10.2 为什么会出现平台误归类（例如提到 Shopify 但主体不是 Shopify）？
 - 平台识别基于标题/来源规则，已加入 WooCommerce-迁移语义修正
@@ -237,6 +239,19 @@ python -m news_pipeline.daily_brief
 ### 11.1 推荐部署形态（前后端同域）
 - Node 服务托管静态资源 + API
 - 避免 GitHub Pages 无法承载 `/api/*` 的问题
+
+### 11.3 生产调度（当前）
+- 仅保留服务器 `systemd` 调度（不依赖 GitHub cron）
+- 定时器：`insight-news-pipeline.timer`
+- 服务：`insight-news-pipeline.service`
+- 执行链路：`main && daily_brief`（严格依赖）
+
+可用以下命令核验：
+```bash
+systemctl status insight-news-pipeline.timer --no-pager
+systemctl cat insight-news-pipeline.service
+journalctl -u insight-news-pipeline.service -n 100 --no-pager
+```
 
 ### 11.2 若前端静态托管（如 GitHub Pages）
 - 必须额外部署 Node API 服务
@@ -258,9 +273,8 @@ python -m news_pipeline.daily_brief
 ## 13. 版本与最近更新
 
 近期关键更新：
-- `daily_brief` 调度由 6 小时改为每小时
+- 生产调度统一为服务器 `systemd` 每 6 小时（`main -> daily_brief` 串行）
 - AI 助手总结输出改为结构化可读格式
 - 示例问题证据支持可点击链接
 - 英文标题/驱动增加中文兜底
 - 平台归类规则修复（WooCommerce/Shopify 场景）
-
