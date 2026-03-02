@@ -70,7 +70,7 @@ function buildPriorityActions(brief) {
 }
 
 function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
-  const [metricsOpen, setMetricsOpen] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(true);
   const [citationsOpen, setCitationsOpen] = useState(false);
 
   const brief = strategyBrief || {
@@ -126,13 +126,6 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         </div>
 
         <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={() => document.getElementById("strategic-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="rounded-md border border-cyan-300/40 bg-cyan-300/15 px-2.5 py-1 text-[11px] font-medium text-cyan-100 hover:bg-cyan-300/25"
-          >
-            查看行动板
-          </button>
           <button
             type="button"
             onClick={() => onOpenEvidence({ title: "战略证据", newsIds: (indexes || []).flatMap((i) => i?.evidence?.newsIds || []) })}

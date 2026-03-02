@@ -49,11 +49,11 @@ function DashboardPage({
 
   return (
     <>
-      <div id="overview">
+      <div id="overview" className="scroll-mt-24">
         <StrategicOverview strategyBrief={insight.strategyBrief} indexes={insight.indexes} onOpenEvidence={onOpenEvidence} />
       </div>
 
-      <div id="revenue">
+      <div id="revenue" className="scroll-mt-24">
         <RevenueImpact
           insight={insight}
           news={news}
@@ -66,11 +66,11 @@ function DashboardPage({
         />
       </div>
 
-      <div id="reasoning">
+      <div id="reasoning" className="scroll-mt-24">
         <ReasoningEngine insight={insight} scoreBreakdown={scoreBreakdown} onOpenEvidence={onOpenEvidence} />
       </div>
 
-      <div id="feed">
+      <div id="feed" className="scroll-mt-24">
         <IntelligenceFeed
           news={feedNews}
           favorites={favorites}
@@ -80,7 +80,7 @@ function DashboardPage({
         />
       </div>
 
-      <div id="matrix">
+      <div id="matrix" className="scroll-mt-24">
         <CompetitionMatrix rows={matrix} onOpenEvidence={onOpenEvidence} onOpenLibraryByIds={onOpenLibraryByIds} />
       </div>
 

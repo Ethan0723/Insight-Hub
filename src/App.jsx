@@ -181,7 +181,11 @@ function App() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
-      document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const target = document.getElementById(key);
+      if (!target) return;
+      const navOffset = 92;
+      const top = target.getBoundingClientRect().top + window.scrollY - navOffset;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 10);
   };
 
