@@ -42,11 +42,15 @@ def _parse_json_obj(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _trim_text(value: Any, limit: int) -> str:
-    text = str(value or "").strip().replace("\n", " ")
+def _normalize_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _truncate_for_prompt(value: Any, limit: int) -> str:
+    text = _normalize_text(value)
     if len(text) <= limit:
         return text
-    return text[: limit - 1].rstrip() + "…"
+    return text[:limit].rstrip()
 
 
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
@@ -112,13 +116,17 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "id": str(row.get("id") or "").strip(),
                 "url": str(row.get("url") or "").strip(),
-                "title": _trim_text(row.get("title"), 140),
-                "source": _trim_text(row.get("source"), 50) or "Unknown",
-                "summary": _trim_text(summary_text or row.get("content"), 380),
+                "title": _truncate_for_prompt(row.get("title"), 140),
+                "source": _truncate_for_prompt(row.get("source"), 50) or "Unknown",
+                "summary": _truncate_for_prompt(summary_text or row.get("content"), 380),
                 "risk_level": risk,
                 "impact_score": max(0, min(100, impact_score)),
-                "platform": _trim_text(row.get("platform"), 40) or _trim_text(summary_obj.get("platform"), 40) or "Global",
-                "region": _trim_text(row.get("region"), 40) or _trim_text(summary_obj.get("region"), 40) or "Global",
+                "platform": _truncate_for_prompt(row.get("platform"), 40)
+                or _truncate_for_prompt(summary_obj.get("platform"), 40)
+                or "Global",
+                "region": _truncate_for_prompt(row.get("region"), 40)
+                or _truncate_for_prompt(summary_obj.get("region"), 40)
+                or "Global",
                 "tags": tags,
                 "created_at": created_at_raw,
             }
@@ -180,6 +188,7 @@ def _build_prompt(*, input_news: list[dict[str, Any]], style: str, low_sample: b
 4) 引用必须来自输入新闻 id/url，不允许编造。
 5) {low_sample_line}
 6) 只输出严格 JSON，不要 Markdown，不要解释。
+7) 不允许使用“...”或“…”省略信息，必须输出完整句子。
 
 输出字段必须完整：
 {{
@@ -243,10 +252,10 @@ def _normalize_brief(
     scanned: int,
     low_sample: bool,
 ) -> dict[str, Any]:
-    headline = _trim_text(raw.get("headline"), 28) or "外部冲击升温，优先守住支付与履约"
-    one_liner = _trim_text(raw.get("one_liner"), 80) or "跨境成本与平台规则同步变化，先稳支付合规与转化。"
+    headline = _normalize_text(raw.get("headline")) or "外部冲击升温，优先守住支付与履约"
+    one_liner = _normalize_text(raw.get("one_liner")) or "跨境成本与平台规则同步变化，先稳支付合规与转化。"
     if low_sample and "样本少" not in one_liner:
-        one_liner = _trim_text(f"{one_liner}（样本少）", 80)
+        one_liner = _normalize_text(f"{one_liner}（样本少）")
 
     top_drivers: list[dict[str, Any]] = []
     if isinstance(raw.get("top_drivers"), list):
@@ -255,8 +264,8 @@ def _normalize_brief(
                 continue
             top_drivers.append(
                 {
-                    "title": _trim_text(item.get("title"), 18) or "外部信号变化",
-                    "why_it_matters": _trim_text(item.get("why_it_matters"), 60) or "对商家经营和SaaS决策有直接影响。",
+                    "title": _normalize_text(item.get("title")) or "外部信号变化",
+                    "why_it_matters": _normalize_text(item.get("why_it_matters")) or "对商家经营和SaaS决策有直接影响。",
                     "signals": _clean_citations(item.get("signals"), input_news)[:3],
                 }
             )
@@ -265,20 +274,20 @@ def _normalize_brief(
         for item in input_news[:3]:
             top_drivers.append(
                 {
-                    "title": _trim_text(item.get("title"), 18) or "外部信号变化",
-                    "why_it_matters": _trim_text(item.get("summary"), 60) or "对商家经营和SaaS决策有直接影响。",
+                    "title": _normalize_text(item.get("title")) or "外部信号变化",
+                    "why_it_matters": _normalize_text(item.get("summary")) or "对商家经营和SaaS决策有直接影响。",
                     "signals": _clean_citations([item.get("id") or item.get("url")], input_news)[:1],
                 }
             )
 
     impacts_raw = raw.get("impacts") if isinstance(raw.get("impacts"), dict) else {}
     impacts = {
-        "merchant_demand": _trim_text(impacts_raw.get("merchant_demand"), 80) or "需求短期受政策与平台动作牵引，需分层判断。",
-        "acquisition": _trim_text(impacts_raw.get("acquisition"), 80) or "投放与渠道成本波动加大，获客效率分化。",
-        "conversion": _trim_text(impacts_raw.get("conversion"), 80) or "转化受支付成功率与价格预期共同影响。",
-        "payments_risk": _trim_text(impacts_raw.get("payments_risk"), 80) or "支付合规与拒付风险需前置处置。",
-        "fulfillment": _trim_text(impacts_raw.get("fulfillment"), 80) or "履约和关税变化可能压缩交付时效。",
-        "competition": _trim_text(impacts_raw.get("competition"), 80) or "头部平台动作提升竞争门槛与迁移成本。",
+        "merchant_demand": _normalize_text(impacts_raw.get("merchant_demand")) or "需求短期受政策与平台动作牵引，需分层判断。",
+        "acquisition": _normalize_text(impacts_raw.get("acquisition")) or "投放与渠道成本波动加大，获客效率分化。",
+        "conversion": _normalize_text(impacts_raw.get("conversion")) or "转化受支付成功率与价格预期共同影响。",
+        "payments_risk": _normalize_text(impacts_raw.get("payments_risk")) or "支付合规与拒付风险需前置处置。",
+        "fulfillment": _normalize_text(impacts_raw.get("fulfillment")) or "履约和关税变化可能压缩交付时效。",
+        "competition": _normalize_text(impacts_raw.get("competition")) or "头部平台动作提升竞争门槛与迁移成本。",
     }
 
     actions_raw = raw.get("actions") if isinstance(raw.get("actions"), list) else []
@@ -289,10 +298,10 @@ def _normalize_brief(
         priority = str(item.get("priority") or "").strip()
         if priority not in {"P0", "P1", "P2"}:
             continue
-        owner = _trim_text(item.get("owner"), 12) or "战略"
-        timeframe = _trim_text(item.get("timeframe"), 12) or {"P0": "24-72h", "P1": "1-2w", "P2": "本月"}[priority]
-        action_text = _trim_text(item.get("action"), 60) or "建立跟踪看板并落地负责人。"
-        success_metric = _trim_text(item.get("success_metric"), 30) or "关键指标环比改善"
+        owner = _normalize_text(item.get("owner")) or "战略"
+        timeframe = _normalize_text(item.get("timeframe")) or {"P0": "24-72h", "P1": "1-2w", "P2": "本月"}[priority]
+        action_text = _normalize_text(item.get("action")) or "建立跟踪看板并落地负责人。"
+        success_metric = _normalize_text(item.get("success_metric")) or "关键指标环比改善"
         actions.append(
             {
                 "priority": priority,
@@ -337,18 +346,15 @@ def _normalize_brief(
 def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: bool) -> dict[str, Any]:
     top = input_news[:3]
     if top:
-        anchor = _trim_text(top[0].get("title"), 16)
-        headline = _trim_text(f"{anchor}触发策略收缩与防守", 28)
-        one_liner = _trim_text(
-            "外部事件正在压缩商家利润与履约弹性，优先稳支付、转化和高风险客户。",
-            80,
-        )
+        anchor = _normalize_text(top[0].get("title"))
+        headline = _normalize_text(f"{anchor}触发策略收缩与防守")
+        one_liner = _normalize_text("外部事件正在压缩商家利润与履约弹性，优先稳支付、转化和高风险客户。")
     else:
         headline = "样本偏少，先执行防守型策略"
         one_liner = "当天可用新闻有限，先按支付合规与履约稳定进行保守决策。"
 
     if low_sample and "样本少" not in one_liner:
-        one_liner = _trim_text(f"{one_liner}（样本少）", 80)
+        one_liner = _normalize_text(f"{one_liner}（样本少）")
 
     return _normalize_brief(
         {
@@ -356,8 +362,8 @@ def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: 
             "one_liner": one_liner,
             "top_drivers": [
                 {
-                    "title": _trim_text(item.get("title"), 18),
-                    "why_it_matters": _trim_text(item.get("summary"), 60),
+                    "title": _normalize_text(item.get("title")),
+                    "why_it_matters": _normalize_text(item.get("summary")),
                     "signals": [item.get("id") or item.get("url")],
                 }
                 for item in top
@@ -404,7 +410,7 @@ def generate_daily_brief() -> dict[str, Any]:
         )
     except Exception as exc:
         fallback_used = True
-        raw_preview = _trim_text(llm_resp.get("raw_text") if isinstance(llm_resp, dict) else "", 400)
+        raw_preview = _truncate_for_prompt(llm_resp.get("raw_text") if isinstance(llm_resp, dict) else "", 400)
         print(f"[DAILY_BRIEF][WARN] fallback used | reason={exc} | raw_preview={raw_preview}")
         brief_payload = _fallback_brief(input_news, scanned=len(raw_rows), low_sample=low_sample)
 
