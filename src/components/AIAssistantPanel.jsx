@@ -54,7 +54,11 @@ function escapeRegExp(text) {
 
 function formatStructuredSections(text) {
   let normalized = String(text || '');
-  const labels = ['跨境 SaaS 战略摘要', '战略摘要', '外部风险信号：', '收入结构影响：', '优先方向：', '结论：', '依据：', '建议：'];
+  normalized = normalized
+    .replace(/跨境\s*SaaS\s*\n+\s*战略摘要/g, '跨境 SaaS 战略摘要')
+    .replace(/跨境SaaS\s*\n+\s*战略摘要/g, '跨境 SaaS 战略摘要');
+
+  const labels = ['外部风险信号：', '收入结构影响：', '优先方向：', '结论：', '依据：', '建议：'];
   labels.forEach((label) => {
     const pattern = new RegExp(`\\s*${escapeRegExp(label)}\\s*`, 'g');
     normalized = normalized.replace(pattern, `\n\n${label} `);
@@ -62,6 +66,69 @@ function formatStructuredSections(text) {
   normalized = normalized.replace(/\s+([1-9]\.)\s+/g, '\n$1 ');
   normalized = normalized.replace(/\n{3,}/g, '\n\n');
   return normalized.trim();
+}
+
+function toNumberedItems(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+
+  const numbered = raw
+    .replace(/\r/g, '')
+    .replace(/\n+/g, ' ')
+    .replace(/\s*([1-9]\.)\s*/g, '\n$1 ')
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.replace(/^[1-9]\.\s*/, '').trim())
+    .filter(Boolean);
+
+  if (numbered.length > 0) {
+    return numbered.slice(0, 6);
+  }
+
+  return raw
+    .split(/[。；;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function formatExecutiveSummaryText(text) {
+  const normalized = formatStructuredSections(sanitizePlainText(text));
+  const matchSection = (name, endNames) => {
+    const endPattern = endNames.length ? `(?:${endNames.map((n) => escapeRegExp(n)).join('|')})` : '$';
+    const reg = new RegExp(`${escapeRegExp(name)}\\s*([\\s\\S]*?)${endPattern}`, 'i');
+    const m = normalized.match(reg);
+    return m ? m[1].trim() : '';
+  };
+
+  const risk = matchSection('外部风险信号：', ['收入结构影响：', '优先方向：']);
+  const revenue = matchSection('收入结构影响：', ['优先方向：']);
+  const priority = matchSection('优先方向：', []);
+
+  const riskItems = toNumberedItems(risk);
+  const revenueItems = toNumberedItems(revenue);
+  const priorityItems = toNumberedItems(priority);
+
+  const blocks = [];
+  blocks.push('跨境 SaaS 战略摘要');
+  blocks.push('');
+  blocks.push('外部风险信号：');
+  (riskItems.length ? riskItems : ['暂无可提炼信号']).forEach((item, idx) => {
+    blocks.push(`${idx + 1}. ${item}`);
+  });
+  blocks.push('');
+  blocks.push('收入结构影响：');
+  (revenueItems.length ? revenueItems : ['暂无明确结构性变化']).forEach((item, idx) => {
+    blocks.push(`${idx + 1}. ${item}`);
+  });
+  blocks.push('');
+  blocks.push('优先方向：');
+  (priorityItems.length ? priorityItems : ['先执行最小可逆动作并跟踪核心指标']).forEach((item, idx) => {
+    blocks.push(`${idx + 1}. ${item}`);
+  });
+
+  return blocks.join('\n');
 }
 
 function stripWeakeningLanguage(text) {
@@ -497,7 +564,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
             setMessages((prev) =>
               prev.map((item) =>
                 item.id === assistantId
-                  ? { ...item, text: formatStructuredSections(sanitizePlainText(`${item.text}${token}`)) }
+                  ? { ...item, text: formatExecutiveSummaryText(`${item.text}${token}`) }
                   : item
               )
             );
@@ -563,7 +630,10 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           item.id === assistantId
             ? {
                 ...item,
-                text: formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
+                text:
+                  !isSample && isNewsSummaryQuestion(question)
+                    ? formatExecutiveSummaryText(item.text || fallbackText)
+                    : formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
                 sources: item.sources && item.sources.length > 0 ? item.sources : fallbackSources,
                 pending: false,
                 error: noRecentNews && !isSample ? '' : isSample ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
