@@ -85,8 +85,13 @@ function isNegatedShopifyTitle(title: string): boolean {
     /(woocommerce|woo commerce)/.test(t) &&
     /shopify/.test(t) &&
     /(instead of|rather than|not|without|vs|versus|而非|不是|并非|转向|放弃|没有选择)/.test(title);
+  const hasWooMigrationContext =
+    /(woocommerce|woo commerce)/.test(t) &&
+    /shopify/.test(t) &&
+    /(迁移|指南|对比|替代|migration|migrate|guide|switch|from)/.test(title);
   return (
     hasWooCommerceContrast ||
+    hasWooMigrationContext ||
     /(not|without|instead of|vs|leave|left)\s+shopify/.test(t) ||
     /shopify\s+(not|without|instead of|vs)/.test(t) ||
     /没有(选择|采用)?\s*shopify/i.test(title) ||
