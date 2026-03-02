@@ -105,25 +105,57 @@ function normalizeDailyBrief(raw) {
   };
 }
 
-function buildEvidenceList(brief) {
-  const fromCitations = Array.isArray(brief?.citations)
-    ? brief.citations.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-  const fromSignals = Array.isArray(brief?.topDrivers)
-    ? brief.topDrivers.flatMap((driver) =>
-        Array.isArray(driver?.signals) ? driver.signals.map((signal) => String(signal || '').trim()).filter(Boolean) : []
-      )
-    : [];
-  return [...new Set([...fromCitations, ...fromSignals])].slice(0, 6);
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
 }
 
-function buildSampleQuestionAnswer(question, brief) {
+function buildEvidenceLinks(brief, news) {
+  const newsMap = new Map();
+  (news || []).forEach((item) => {
+    const id = String(item?.id || '').trim();
+    const url = String(item?.originalUrl || '').trim();
+    if (id && url && isHttpUrl(url)) {
+      newsMap.set(id, url);
+    }
+  });
+
+  const rawEvidence = [];
+  if (Array.isArray(brief?.citations)) {
+    brief.citations.forEach((item) => {
+      const value = String(item || '').trim();
+      if (value) rawEvidence.push(value);
+    });
+  }
+  if (Array.isArray(brief?.topDrivers)) {
+    brief.topDrivers.forEach((driver) => {
+      if (Array.isArray(driver?.signals)) {
+        driver.signals.forEach((signal) => {
+          const value = String(signal || '').trim();
+          if (value) rawEvidence.push(value);
+        });
+      }
+    });
+  }
+
+  const links = rawEvidence
+    .map((value) => {
+      if (isHttpUrl(value)) return value;
+      return newsMap.get(value) || '';
+    })
+    .filter((value) => isHttpUrl(value));
+
+  return [...new Set(links)].slice(0, 6);
+}
+
+function buildSampleQuestionAnswer(question, brief, news) {
   const q = String(question || '').trim();
   const drivers = Array.isArray(brief?.topDrivers) ? brief.topDrivers.slice(0, 3) : [];
   const actions = Array.isArray(brief?.actions) ? brief.actions : [];
   const impacts = brief?.impacts && typeof brief.impacts === 'object' ? brief.impacts : {};
-  const evidence = buildEvidenceList(brief);
-  const evidenceText = evidence.length ? evidence.join(', ') : 'daily_brief_latest';
+  const evidenceLinks = buildEvidenceLinks(brief, news);
+  const evidenceText = evidenceLinks.length
+    ? evidenceLinks.join(' | ')
+    : '证据链接暂不可用（可通过“查看证据新闻”查看详情）';
 
   const defaultDriver =
     drivers[0] ||
@@ -432,7 +464,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           setLatestBrief(rawBrief);
         }
         const brief = normalizeDailyBrief(rawBrief);
-        const answer = buildSampleQuestionAnswer(question, brief);
+        const answer = buildSampleQuestionAnswer(question, brief, news);
         setMessages((prev) =>
           prev.map((item) => (item.id === assistantId ? { ...item, text: answer, pending: false } : item))
         );
@@ -496,7 +528,8 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
                 actions: [],
                 citations: [],
                 stats: {}
-              }
+              },
+              news
             )
           : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
 
