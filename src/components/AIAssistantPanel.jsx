@@ -48,6 +48,22 @@ function sanitizePlainText(text) {
     .trim();
 }
 
+function escapeRegExp(text) {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatStructuredSections(text) {
+  let normalized = String(text || '');
+  const labels = ['跨境 SaaS 战略摘要', '战略摘要', '外部风险信号：', '收入结构影响：', '优先方向：', '结论：', '依据：', '建议：'];
+  labels.forEach((label) => {
+    const pattern = new RegExp(`\\s*${escapeRegExp(label)}\\s*`, 'g');
+    normalized = normalized.replace(pattern, `\n\n${label} `);
+  });
+  normalized = normalized.replace(/\s+([1-9]\.)\s+/g, '\n$1 ');
+  normalized = normalized.replace(/\n{3,}/g, '\n\n');
+  return normalized.trim();
+}
+
 function stripWeakeningLanguage(text) {
   return String(text || '')
     .replace(/样本少[^。；\n]*[。；]?/g, '')
@@ -153,10 +169,6 @@ function buildSampleQuestionAnswer(question, brief, news) {
   const actions = Array.isArray(brief?.actions) ? brief.actions : [];
   const impacts = brief?.impacts && typeof brief.impacts === 'object' ? brief.impacts : {};
   const evidenceLinks = buildEvidenceLinks(brief, news);
-  const evidenceText = evidenceLinks.length
-    ? evidenceLinks.join(' | ')
-    : '证据链接暂不可用（可通过“查看证据新闻”查看详情）';
-
   const defaultDriver =
     drivers[0] ||
     ({
@@ -208,9 +220,16 @@ function buildSampleQuestionAnswer(question, brief, news) {
 
   const owner = String(p0Action?.owner || '待定').trim();
   const timeframe = String(p0Action?.timeframe || '24-72h').trim();
-  const paragraph3 = `下一步建议：由${owner}在${timeframe}内先落地该动作，并同步设定一组可回滚阈值（转化率、支付成功率、退款/拒付率）。若48小时内指标没有改善，就保守收缩增量投入并切换到备用动作。证据来源：${evidenceText}`;
+  const paragraph3 = `下一步建议：由${owner}在${timeframe}内先落地该动作，并同步设定一组可回滚阈值（转化率、支付成功率、退款/拒付率）。若48小时内指标没有改善，就保守收缩增量投入并切换到备用动作。${evidenceLinks.length ? '证据来源见下方链接。' : ''}`;
 
-  return sanitizePlainText([paragraph1, paragraph2, paragraph3].join('\n\n'));
+  return {
+    text: sanitizePlainText([paragraph1, paragraph2, paragraph3].join('\n\n')),
+    sources: evidenceLinks.map((url, idx) => ({
+      title: `证据链接 ${idx + 1}`,
+      url,
+      source: 'daily_brief'
+    }))
+  };
 }
 
 function buildExposureMatrix(scoreBreakdown) {
@@ -466,7 +485,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
         const brief = normalizeDailyBrief(rawBrief);
         const answer = buildSampleQuestionAnswer(question, brief, news);
         setMessages((prev) =>
-          prev.map((item) => (item.id === assistantId ? { ...item, text: answer, pending: false } : item))
+          prev.map((item) => (item.id === assistantId ? { ...item, text: answer.text, sources: answer.sources, pending: false } : item))
         );
       } else if (isNewsSummaryQuestion(question)) {
         const newsItems = pickRecentNewsItems(news, 7, 12);
@@ -477,7 +496,9 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           onToken: (token) => {
             setMessages((prev) =>
               prev.map((item) =>
-                item.id === assistantId ? { ...item, text: sanitizePlainText(`${item.text}${token}`) } : item
+                item.id === assistantId
+                  ? { ...item, text: formatStructuredSections(sanitizePlainText(`${item.text}${token}`)) }
+                  : item
               )
             );
           },
@@ -499,11 +520,13 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           },
           {
             onToken: (token) => {
-              setMessages((prev) =>
-                prev.map((item) =>
-                  item.id === assistantId ? { ...item, text: sanitizePlainText(`${item.text}${token}`) } : item
-                )
-              );
+            setMessages((prev) =>
+              prev.map((item) =>
+                  item.id === assistantId
+                    ? { ...item, text: formatStructuredSections(sanitizePlainText(`${item.text}${token}`)) }
+                    : item
+              )
+            );
             },
             onSources: (sources) => {
               setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, sources } : item)));
@@ -532,13 +555,16 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
               news
             )
           : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
+      const fallbackText = typeof fallback === 'string' ? fallback : fallback.text;
+      const fallbackSources = typeof fallback === 'string' ? [] : fallback.sources;
 
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantId
             ? {
                 ...item,
-                text: sanitizePlainText(item.text || fallback),
+                text: formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
+                sources: item.sources && item.sources.length > 0 ? item.sources : fallbackSources,
                 pending: false,
                 error: noRecentNews && !isSample ? '' : isSample ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
               }
