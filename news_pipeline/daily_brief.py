@@ -427,7 +427,13 @@ def generate_daily_brief() -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    inserted = upsert_daily_brief(row)
+    inserted: dict[str, Any] = {}
+    write_error = ""
+    try:
+        inserted = upsert_daily_brief(row)
+    except Exception as exc:
+        write_error = str(exc)
+        print(f"[DAILY_BRIEF][ERROR] upsert failed | error={write_error}")
     generated_at = str(inserted.get("generated_at") or row["generated_at"])
 
     return {
@@ -437,6 +443,7 @@ def generate_daily_brief() -> dict[str, Any]:
         "scanned": len(raw_rows),
         "selected": len(input_news),
         "written": bool(inserted),
+        "write_error": write_error,
         "generated_at": generated_at,
         "headline": brief_payload["headline"],
         "one_liner": brief_payload["one_liner"],
@@ -455,6 +462,8 @@ def main() -> None:
     print(f"[DAILY_BRIEF] headline={result['headline']}")
     print(f"[DAILY_BRIEF] one_liner={result['one_liner']}")
     print(f"[DAILY_BRIEF] citations={result['citations_count']} fallback={result['fallback_used']}")
+    if result.get("write_error"):
+        print(f"[DAILY_BRIEF] write_error={result['write_error']}")
 
 
 if __name__ == "__main__":
