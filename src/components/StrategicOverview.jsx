@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 const riskRank = { 高: 3, 中: 2, 低: 1 };
 
@@ -8,8 +8,6 @@ const clamp = (lines) => ({
   WebkitBoxOrient: "vertical",
   overflow: "hidden",
 });
-
-const isUuidLike = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 
 const safeText = (value, fallback = "") => {
   const text = String(value || "").trim();
@@ -31,82 +29,94 @@ function sortByPriority(items) {
   });
 }
 
-function mapActionsByWindow(actions) {
-  const groups = {
-    "24-72h": [],
-    "1-2w": [],
-    "本月": []
-  };
+function inferDirection(text, riskLevel) {
+  const content = String(text || "").toLowerCase();
+  if (/(增长|回暖|提升|走强|扩张|改善|上行|加速|机会)/.test(content)) return "↑";
+  if (/(下降|收缩|承压|风险|下滑|走弱|恶化|放缓|波动)/.test(content)) return "↓";
+  if (riskLevel === "高") return "↓";
+  return "=";
+}
 
-  (actions || []).forEach((action) => {
-    const priority = safeText(action?.priority, "P1");
-    let bucket = "1-2w";
-    if (priority === "P0") bucket = "24-72h";
-    if (priority === "P2") bucket = "本月";
+function normalizeVariableName(raw, index) {
+  const seed = safeText(raw, `变量${index + 1}`)
+    .split(/[：:，,。；;|/]/)[0]
+    .trim();
+  return seed.length > 10 ? `${seed.slice(0, 10)}…` : seed;
+}
 
-    groups[bucket].push({
-      priority,
-      owner: safeText(action?.owner, "战略"),
-      action: safeText(action?.action, "暂无行动描述"),
-      expected_effect: safeText(action?.expected_effect, "待补充指标"),
-      time_horizon: safeText(action?.time_horizon, bucket),
+function buildCoreVariables(brief) {
+  const drivers = sortByPriority(Array.isArray(brief?.top_drivers) ? brief.top_drivers : []).slice(0, 3);
+  if (drivers.length) {
+    return drivers.map((item, idx) => {
+      const explain = safeText(item?.why, safeText(brief?.one_liner, "暂无影响解释"));
+      return {
+        name: normalizeVariableName(item?.title, idx),
+        direction: inferDirection(`${item?.title} ${explain}`, item?.risk_level),
+        note: explain,
+      };
     });
+  }
+
+  const fallback = [
+    { name: "商家需求", note: safeText(brief?.impacts?.merchant_demand, "需求侧暂无明显波动。") },
+    { name: "支付稳定", note: safeText(brief?.impacts?.payments_risk, "支付链路整体可控。") },
+    { name: "竞争压力", note: safeText(brief?.impacts?.competition, "竞争态势维持观察。") },
+  ];
+
+  return fallback.map((item) => ({ ...item, direction: inferDirection(item.note, "中") }));
+}
+
+function buildImpactGrid(brief) {
+  const model = brief?.impact_on_revenue_model || {};
+  const impacts = brief?.impacts || {};
+
+  return [
+    {
+      id: "subscription",
+      title: "订阅",
+      text: safeText(impacts?.merchant_demand, safeText(model?.subscription?.note, "订阅侧暂无明显变化")),
+    },
+    {
+      id: "commission",
+      title: "佣金",
+      text: safeText(impacts?.acquisition, safeText(model?.commission?.note, "佣金侧暂无明显变化")),
+    },
+    {
+      id: "payment",
+      title: "支付",
+      text: safeText(impacts?.payments_risk, safeText(model?.payment?.note, "支付侧暂无明显变化")),
+    },
+    {
+      id: "ecosystem",
+      title: "生态",
+      text: safeText(impacts?.competition, safeText(model?.ecosystem?.note, "生态侧暂无明显变化")),
+    },
+  ];
+}
+
+function buildPriorityActions(brief) {
+  const list = Array.isArray(brief?.actions) ? brief.actions : [];
+
+  const findByPriority = (priority) => list.find((item) => safeText(item?.priority) === priority);
+  const mapTime = (priority) => (priority === "P0" ? "24-72h" : priority === "P1" ? "1-2w" : "本月");
+
+  return ["P0", "P1", "P2"].map((priority) => {
+    const hit = findByPriority(priority);
+    return {
+      priority,
+      timeframe: safeText(hit?.time_horizon, mapTime(priority)),
+      owner: safeText(hit?.owner, "战略"),
+      action: safeText(hit?.action, "暂无明确行动，建议保持跟踪。"),
+    };
   });
-
-  return groups;
-}
-
-function getCiteTitle(item) {
-  const title = safeText(item?.title);
-  if (!title || isUuidLike(title)) return "来源条目（标题缺失）";
-  return title;
-}
-
-function getCitationSummary(item, fallbackOneLiner) {
-  const keys = Array.isArray(item?.matched_keywords) ? item.matched_keywords.filter(Boolean) : [];
-  if (keys.length > 0) return `关键词：${keys.slice(0, 3).join(" / ")}`;
-  if (safeText(item?.risk_level)) return `风险${item.risk_level}，影响分${item.impact_score ?? 0}。`;
-  return safeText(fallbackOneLiner, "暂无摘要");
-}
-
-function ImpactCell({ title, data, detail, expanded, onToggle }) {
-  const direction = safeText(data?.direction, "→");
-  const note = safeText(data?.note, "暂无影响结论");
-  const short = note.length > 16 ? `${note.slice(0, 16)}…` : note;
-  const fullDetail = detail ? safeText(detail) : note;
-  const tag = direction === "↑" ? "上行" : direction === "↓" ? "下行" : "中性";
-
-  return (
-    <article className="rounded-xl border border-slate-700/60 bg-slate-900/75 p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">{title}</p>
-        <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[10px] text-cyan-200">{tag}</span>
-      </div>
-      <p className="mt-1.5 text-xs font-medium text-slate-100" style={clamp(1)}>{short}</p>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="mt-1.5 text-[11px] text-cyan-200 underline-offset-4 hover:underline"
-      >
-        {expanded ? "收起分析" : "展开分析"}
-      </button>
-      {expanded ? <p className="mt-1.5 text-xs leading-5 text-slate-300">{fullDetail}</p> : null}
-    </article>
-  );
 }
 
 function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
-  const [driversExpanded, setDriversExpanded] = useState(false);
-  const [citationsOpen, setCitationsOpen] = useState(false);
-  const [citationCardsOpen, setCitationCardsOpen] = useState(false);
-  const [impactOpenKey, setImpactOpenKey] = useState("");
-
   const brief = strategyBrief || {
     headline: "今日未发现高影响信号",
     one_liner: "暂无可用结论，继续观察。",
     time_window: "今天",
     top_drivers: [],
-    citations: [],
     impact_on_revenue_model: {
       subscription: { direction: "→", note: "无数据" },
       commission: { direction: "→", note: "无数据" },
@@ -115,39 +125,11 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
     },
     actions: [],
     impacts: {},
-    meta: { news_count_scanned: 0, news_count_used: 0, generated_at: "" },
   };
 
-  const chips = useMemo(
-    () => [
-      "仅基于 news_raw",
-      `扫描 ${brief?.meta?.news_count_scanned || 0} 条`,
-      `引用 ${brief?.meta?.news_count_used || 0} 条`,
-      safeText(brief?.time_window, "今天"),
-    ],
-    [brief]
-  );
-
-  const sortedDrivers = useMemo(() => {
-    const list = sortByPriority(Array.isArray(brief?.top_drivers) ? brief.top_drivers : []);
-    return list.slice(0, 5);
-  }, [brief]);
-
-  const shownDrivers = driversExpanded ? sortedDrivers : sortedDrivers.slice(0, 3);
-
-  const sortedCitations = useMemo(() => {
-    const list = sortByPriority(Array.isArray(brief?.citations) ? brief.citations : []);
-    return list.sort((a, b) => {
-      const aBad = getCiteTitle(a) === "来源条目（标题缺失）" ? 1 : 0;
-      const bBad = getCiteTitle(b) === "来源条目（标题缺失）" ? 1 : 0;
-      return aBad - bBad;
-    });
-  }, [brief]);
-
-  const groupedActions = useMemo(() => mapActionsByWindow(Array.isArray(brief?.actions) ? brief.actions : []), [brief]);
-
-  const impactDetail = brief?.impacts || {};
-  const impactModel = brief?.impact_on_revenue_model || {};
+  const coreVariables = useMemo(() => buildCoreVariables(brief), [brief]);
+  const impactGrid = useMemo(() => buildImpactGrid(brief), [brief]);
+  const actions = useMemo(() => buildPriorityActions(brief), [brief]);
 
   return (
     <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-4 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-5">
@@ -155,14 +137,6 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">AI 今日战略判断</p>
         <h3 className="mt-1.5 text-2xl font-semibold text-slate-100" style={clamp(1)}>{safeText(brief.headline, "今日暂无清晰结论")}</h3>
         <p className="mt-1.5 text-sm text-slate-300" style={clamp(1)}>{safeText(brief.one_liner, "暂无结论解释")}</p>
-
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {chips.slice(0, 3).map((chip) => (
-            <span key={chip} className="rounded-full border border-slate-700/80 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300">
-              {chip}
-            </span>
-          ))}
-        </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -174,146 +148,55 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
           </button>
           <button
             type="button"
-            onClick={() => setCitationsOpen(true)}
+            onClick={() => onOpenEvidence({ title: "战略证据", newsIds: (indexes || []).flatMap((i) => i?.evidence?.newsIds || []) })}
             className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-medium text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
           >
-            查看全部证据
+            查看证据
           </button>
-          <span className="ml-auto text-[11px] text-slate-400">
-            生成于 {brief?.meta?.generated_at ? new Date(brief.meta.generated_at).toLocaleString() : "—"}
-          </span>
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 xl:grid-cols-[1.25fr_1fr]">
+      <div className="mt-3 grid gap-3 xl:grid-cols-[1.2fr_1fr]">
         <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">今日驱动</p>
-            {sortedDrivers.length > 3 ? (
-              <button
-                type="button"
-                onClick={() => setDriversExpanded((v) => !v)}
-                className="text-xs text-cyan-200 underline-offset-4 hover:underline"
-              >
-                {driversExpanded ? "收起" : "展开更多"}
-              </button>
-            ) : null}
-          </div>
-
+          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">核心变量</p>
           <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
-            {shownDrivers.length ? shownDrivers.map((driver, idx) => (
-              <article key={`${safeText(driver?.title, "driver")}-${idx}`} className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-2">
-                <p className="text-xs font-medium text-slate-100" style={clamp(1)}>{safeText(driver?.title, "未命名驱动")}</p>
+            {coreVariables.map((item, idx) => (
+              <article key={`${item.name}-${idx}`} className="rounded-lg border border-slate-700/60 bg-slate-900/75 p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-slate-100" style={clamp(1)}>{item.name}</p>
+                  <span className="text-sm font-semibold text-cyan-200">{item.direction}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400" style={clamp(1)}>{item.note}</p>
               </article>
-            )) : <p className="text-xs text-slate-400">暂未识别今日驱动因素。</p>}
+            ))}
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">SaaS 影响拆解</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">SaaS 影响</p>
           <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {[
-              ["subscription", "订阅", impactDetail?.merchant_demand],
-              ["commission", "佣金", impactDetail?.acquisition],
-              ["payment", "支付", impactDetail?.payments_risk],
-              ["ecosystem", "生态", impactDetail?.competition],
-            ].map(([key, label, detail]) => (
-              <ImpactCell
-                key={key}
-                title={label}
-                data={impactModel?.[key] || { direction: "→", note: "暂无结论" }}
-                detail={safeText(detail, safeText(impactModel?.[key]?.note, "暂无补充分析"))}
-                expanded={impactOpenKey === key}
-                onToggle={() => setImpactOpenKey((current) => (current === key ? "" : key))}
-              />
+            {impactGrid.map((item) => (
+              <article key={item.id} className="rounded-lg border border-slate-700/60 bg-slate-900/75 p-2.5">
+                <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400">{item.title}</p>
+                <p className="mt-1 text-xs text-slate-100" style={clamp(1)}>{item.text}</p>
+              </article>
             ))}
           </div>
         </section>
       </div>
 
       <section id="strategic-actions" className="mt-3 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">Action Board</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">优先行动</p>
         <div className="mt-2 grid gap-2 md:grid-cols-3">
-          {[
-            ["24-72h", groupedActions["24-72h"]],
-            ["1-2w", groupedActions["1-2w"]],
-            ["本月", groupedActions["本月"]],
-          ].map(([bucket, items]) => {
-            const list = Array.isArray(items) ? items : [];
-            const first = list[0];
-
-            return (
-              <div key={bucket} className="rounded-lg border border-slate-700/60 bg-slate-900/70 p-2">
-                <p className="text-xs font-medium text-slate-100">{bucket}</p>
-                {first ? (
-                  <article className="mt-1.5 rounded-md border border-slate-700/70 bg-slate-950/80 px-2 py-1.5">
-                    <p className="text-[10px] text-slate-400">{safeText(first.priority)} · {safeText(first.owner)}</p>
-                    <p className="mt-0.5 text-xs text-slate-100" style={clamp(2)}>{safeText(first.action)}</p>
-                  </article>
-                ) : <p className="mt-1.5 text-xs text-slate-400">暂无行动建议。</p>}
-              </div>
-            );
-          })}
+          {actions.map((item) => (
+            <article key={item.priority} className="rounded-lg border border-slate-700/60 bg-slate-900/75 p-2.5">
+              <p className="text-[11px] text-slate-400">{item.priority} · {item.timeframe} · {item.owner}</p>
+              <p className="mt-1 text-xs text-slate-100" style={clamp(1)}>{item.action}</p>
+            </article>
+          ))}
         </div>
       </section>
 
-      <section className="mt-3 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">引用新闻</p>
-          <button
-            type="button"
-            onClick={() => setCitationsOpen((v) => !v)}
-            className="text-xs text-cyan-200 underline-offset-4 hover:underline"
-          >
-            {citationsOpen ? "收起" : `展开列表（${sortedCitations.length}）`}
-          </button>
-        </div>
-
-        {citationsOpen ? (
-          <div className="mt-2">
-            <ul className="list-disc space-y-1 pl-4">
-              {sortedCitations.map((item, idx) => (
-                <li key={`${safeText(item?.id, `cite-${idx}`)}-${idx}`} className="text-xs text-slate-300">
-                  <span className="text-slate-400">{safeText(item?.source, "Unknown")}：</span>
-                  <a
-                    href={safeText(item?.url, "#")}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline-offset-4 hover:text-cyan-200 hover:underline"
-                  >
-                    {getCiteTitle(item)}
-                  </a>
-                </li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              onClick={() => setCitationCardsOpen((v) => !v)}
-              className="mt-2 text-xs text-cyan-200 underline-offset-4 hover:underline"
-            >
-              {citationCardsOpen ? "收起原卡片内容" : "展开原卡片内容"}
-            </button>
-            {citationCardsOpen ? (
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {sortedCitations.map((item, idx) => (
-                  <a
-                    key={`${safeText(item?.id, `detail-cite-${idx}`)}-${idx}`}
-                    href={safeText(item?.url, "#")}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3 transition hover:border-cyan-300/40"
-                  >
-                    <p className="text-[11px] text-slate-400">{safeText(item?.source, "Unknown")} · 风险 {safeText(item?.risk_level, "中")}</p>
-                    <p className="mt-1 text-sm font-medium text-slate-100" style={clamp(2)}>{getCiteTitle(item)}</p>
-                    <p className="mt-1 text-xs text-slate-400" style={clamp(2)}>{getCitationSummary(item, brief.one_liner)}</p>
-                  </a>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {!sortedCitations.length ? <p className="mt-2 text-xs text-slate-400">今日暂无引用新闻。</p> : null}
-      </section>
       <section className="mt-3 rounded-2xl border border-slate-700/60 bg-slate-950/50 p-4">
         <div className="flex items-center justify-between">
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">指数明细</p>
