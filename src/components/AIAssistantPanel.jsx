@@ -126,6 +126,33 @@ function toNumberedItems(text) {
   return expanded.slice(0, 6);
 }
 
+function mergeRiskItems(items) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  const merged = [];
+  const shouldMergeWithPrev = (current) => {
+    const t = String(current || '').trim();
+    if (!t) return false;
+    if (t.length <= 10) return true;
+    return /^(政策|风险|合规|品牌|不确定性|达峰|激增|上升)/.test(t);
+  };
+
+  for (const raw of list) {
+    const item = String(raw || '').trim();
+    if (!item) continue;
+    if (merged.length === 0) {
+      merged.push(item);
+      continue;
+    }
+    if (shouldMergeWithPrev(item)) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]}，${item}`;
+    } else {
+      merged.push(item);
+    }
+  }
+
+  return merged.slice(0, 5);
+}
+
 function formatExecutiveSummaryText(text) {
   const normalized = formatStructuredSections(sanitizePlainText(text));
   const matchSection = (name, endNames) => {
@@ -139,7 +166,7 @@ function formatExecutiveSummaryText(text) {
   const revenue = matchSection('收入结构影响：', ['优先方向：']);
   const priority = matchSection('优先方向：', []);
 
-  const riskItems = toNumberedItems(risk);
+  const riskItems = mergeRiskItems(toNumberedItems(risk));
   const revenueItems = toNumberedItems(revenue);
   const priorityItems = toNumberedItems(priority);
   const hasAnyStructuredSection = Boolean(risk || revenue || priority);
