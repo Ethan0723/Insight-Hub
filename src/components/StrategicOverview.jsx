@@ -2,8 +2,10 @@ import { useState } from "react";
 
 function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const [newsOpen, setNewsOpen] = useState(false);
+  const isDailyBrief = strategyBrief?.meta?.brief_source === 'daily_brief';
   const brief = strategyBrief || {
     headline: "今日未发现高影响信号",
+    one_liner: "暂无可用结论，继续观察。",
     time_window: "今天",
     top_drivers: [],
     top_news: [],
@@ -24,9 +26,13 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         <div>
           <p className="mb-1 text-xs uppercase tracking-[0.18em] text-slate-500">AI 今日战略判断</p>
           <h3 className="text-2xl font-semibold text-slate-100 lg:text-3xl">{brief.headline}</h3>
+          <p className="mt-2 text-sm text-slate-300">{brief.one_liner || '暂无结论解释'}</p>
           <p className="text-xs text-slate-400">{brief.time_window || '近72小时'}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-emerald-200">
             <span className="rounded-full border border-emerald-300/40 bg-emerald-300/10 px-2 py-0.5">仅基于 news_raw</span>
+            {isDailyBrief ? (
+              <span className="rounded-full border border-cyan-300/40 bg-cyan-300/10 px-2 py-0.5">优先读取 daily_brief</span>
+            ) : null}
             <span className="rounded-full border border-slate-700/40 bg-slate-950/50 px-2 py-0.5">
               大约扫描 {brief.meta.news_count_scanned} 条，引用 {brief.meta.news_count_used}
             </span>
@@ -39,14 +45,16 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
 
         <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-5 lg:p-6 space-y-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500">今日驱动</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500">今日驱动（3-5条）</p>
             <div className="mt-3 grid gap-3">
               {brief.top_drivers.length ? (
                 brief.top_drivers.map((driver, idx) => (
                   <div key={`${driver.title}-${idx}`} className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
-                    <p className="text-xs text-slate-400">{driver.source} · 影响分 {driver.impact_score} · 风险 {driver.risk_level}</p>
+                    {isDailyBrief ? null : (
+                      <p className="text-xs text-slate-400">{driver.source} · 影响分 {driver.impact_score} · 风险 {driver.risk_level}</p>
+                    )}
                     <p className="mt-1 font-medium text-slate-100">{driver.title}</p>
-                    <p className="mt-1 text-xs text-slate-400">{driver.why}</p>
+                    <p className="mt-1 text-xs text-slate-400">为何重要：{driver.why}</p>
                   </div>
                 ))
               ) : (
@@ -73,21 +81,42 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
             </div>
           </div>
 
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">SaaS 影响拆解</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {Object.entries(brief.impact_on_revenue_model || {}).map(([key, info]) => (
-                <div key={key} className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
-                  <p className="text-[11px] text-slate-400">{key}</p>
-                  <p className="text-sm text-cyan-200">{info.direction}</p>
-                  <p className="mt-1 text-[11px] text-slate-400">{info.note}</p>
-                </div>
-              ))}
+          {isDailyBrief ? (
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">SaaS 影响拆解</p>
+              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {[
+                  ['商家需求', brief.impacts?.merchant_demand],
+                  ['获客渠道', brief.impacts?.acquisition],
+                  ['转化与定价', brief.impacts?.conversion],
+                  ['支付与合规', brief.impacts?.payments_risk],
+                  ['履约与关税', brief.impacts?.fulfillment],
+                  ['竞争格局', brief.impacts?.competition]
+                ].map(([label, text]) => (
+                  <div key={label} className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
+                    <p className="text-[11px] text-slate-400">{label}</p>
+                    <p className="mt-1">{text || '暂无明确影响描述'}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">SaaS 影响拆解</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {Object.entries(brief.impact_on_revenue_model || {}).map(([key, info]) => (
+                  <div key={key} className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
+                    <p className="text-[11px] text-slate-400">{key}</p>
+                    <p className="text-sm text-cyan-200">{info.direction}</p>
+                    <p className="mt-1 text-[11px] text-slate-400">{info.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">建议行动</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">建议行动（24-72h / 1-2w / 本月）</p>
             <div className="mt-2 grid gap-2">
               {brief.actions.length ? (
                 brief.actions.map((action) => (

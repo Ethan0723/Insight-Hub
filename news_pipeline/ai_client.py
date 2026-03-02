@@ -513,3 +513,65 @@ def generate_summary(title: str, content: str) -> dict[str, Any]:
         return _default_payload("模型未返回合法 JSON")
 
     return _normalize_payload(raw_json, title, content)
+
+
+def generate_json_object(
+    prompt: str,
+    *,
+    max_tokens: int = 1500,
+    temperature: float = 0.2,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Generate a strict JSON object for arbitrary prompts.
+
+    Returns:
+      {
+        "ok": bool,
+        "data": dict,
+        "raw_text": str,
+        "model": str,
+        "provider": str,
+        "usage": dict,
+        "finish_reason": str | None,
+      }
+    """
+    if not LLM_API_KEY:
+        raise ValueError("Missing LLM_API_KEY in environment.")
+
+    provider = _detect_provider(LLM_API_URL)
+    endpoint = _resolve_endpoint(LLM_API_URL, provider)
+    model = _resolve_model(provider)
+
+    text, normalized = _request_llm_text(
+        endpoint=endpoint,
+        provider=provider,
+        model=model,
+        api_key=LLM_API_KEY,
+        prompt=prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+
+    clean_text = _strip_code_fence(text)
+    parsed: dict[str, Any] | None = None
+
+    try:
+        loaded = json.loads(clean_text)
+        if isinstance(loaded, dict):
+            parsed = loaded
+    except Exception:
+        parsed = None
+
+    if parsed is None:
+        parsed = _try_extract_json(clean_text)
+
+    return {
+        "ok": isinstance(parsed, dict),
+        "data": parsed or {},
+        "raw_text": clean_text,
+        "model": model,
+        "provider": normalized.get("provider"),
+        "usage": normalized.get("usage") if isinstance(normalized.get("usage"), dict) else {},
+        "finish_reason": normalized.get("finish_reason"),
+    }

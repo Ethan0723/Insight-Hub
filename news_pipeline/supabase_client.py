@@ -13,6 +13,7 @@ from supabase import Client, create_client
 load_dotenv()
 
 _TABLE = "news_raw"
+_DAILY_BRIEF_TABLE = "daily_brief"
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 _SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -197,3 +198,39 @@ def delete_news_by_ids(news_ids: list[str]) -> int:
     except Exception as exc:
         print(f"[WARN] delete_news_by_ids failed | error={exc}")
         return 0
+
+
+def fetch_news_raw_for_daily_brief(
+    *,
+    window_start_iso: str,
+    window_end_iso: str,
+    limit: int = 120,
+) -> list[dict[str, Any]]:
+    """Fetch news_raw rows in [window_start, window_end) for daily brief generation."""
+    try:
+        response = (
+            _client.table(_TABLE)
+            .select(
+                "id,title,content,source,url,summary,impact_score,risk_level,platform,region,created_at,publish_time,event_type"
+            )
+            .gte("created_at", window_start_iso)
+            .lt("created_at", window_end_iso)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception as exc:
+        print(f"[WARN] fetch_news_raw_for_daily_brief failed | error={exc}")
+        return []
+
+
+def upsert_daily_brief(payload: dict[str, Any]) -> dict[str, Any]:
+    """Upsert one daily_brief row by (brief_date, prompt_version)."""
+    response = (
+        _client.table(_DAILY_BRIEF_TABLE)
+        .upsert(payload, on_conflict="brief_date,prompt_version")
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else {}

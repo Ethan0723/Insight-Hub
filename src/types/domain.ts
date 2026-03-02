@@ -98,11 +98,12 @@ export interface StrategyAction {
   owner: '战略' | '产品' | '商业化';
   action: string;
   expected_effect?: string;
-  time_horizon?: '本周' | '本月' | '本季度';
+  time_horizon?: string;
 }
 
 export interface StrategyBrief {
   headline: string;
+  one_liner?: string;
   time_window: string;
   top_drivers: StrategyDriver[];
   top_news: StrategyNews[];
@@ -123,6 +124,14 @@ export interface StrategyBrief {
   };
   signal_case?: 'A' | 'B' | 'C';
   actions: StrategyAction[];
+  impacts?: {
+    merchant_demand?: string;
+    acquisition?: string;
+    conversion?: string;
+    payments_risk?: string;
+    fulfillment?: string;
+    competition?: string;
+  };
   meta: {
     news_count_scanned: number;
     news_count_used: number;
@@ -130,6 +139,7 @@ export interface StrategyBrief {
     direct_signal_count?: number;
     macro_signal_count?: number;
     only_news_raw?: boolean;
+    brief_source?: 'daily_brief' | 'rule_based';
   };
   impact_on_revenue_model?: {
     subscription: { direction: '↑' | '↓' | '→'; note: string };
