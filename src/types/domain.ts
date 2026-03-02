@@ -106,11 +106,30 @@ export interface StrategyBrief {
   time_window: string;
   top_drivers: StrategyDriver[];
   top_news: StrategyNews[];
+  citations?: Array<{
+    id: NewsId;
+    title: string;
+    source: string;
+    url: string;
+    published_at: string;
+    impact_score: number;
+    risk_level: '低' | '中' | '高';
+    matched_keywords: string[];
+  }>;
+  transmission_analysis?: {
+    macro: string;
+    industry: string;
+    saas: string;
+  };
+  signal_case?: 'A' | 'B' | 'C';
   actions: StrategyAction[];
   meta: {
     news_count_scanned: number;
     news_count_used: number;
     generated_at: string;
+    direct_signal_count?: number;
+    macro_signal_count?: number;
+    only_news_raw?: boolean;
   };
   impact_on_revenue_model?: {
     subscription: { direction: '↑' | '↓' | '→'; note: string };

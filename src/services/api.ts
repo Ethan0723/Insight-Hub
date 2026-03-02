@@ -13,7 +13,6 @@ import { mockNews } from '../data/mock/news';
 import { mockAssistant, mockDailyInsight, mockMatrix, mockModelExplainers } from '../data/mock/dashboard';
 import { calculateRevenueImpact } from '../data/mock/revenue';
 import { combineFinalScore } from './score';
-import { buildDailyBriefContext } from './brief-context';
 
 const delay = (ms = 220) => new Promise((resolve) => setTimeout(resolve, ms));
 const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
@@ -450,6 +449,56 @@ function toUtc8DateKey(timestamp: number) {
   return new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+const DIRECT_SIGNAL_KEYWORDS = [
+  'ecommerce',
+  'cross-border',
+  'tariff',
+  'customs',
+  'vat',
+  'de minimis',
+  'payment',
+  'stripe',
+  'shopify',
+  'amazon',
+  'marketplace',
+  'logistics',
+  'fulfillment'
+];
+
+const HEADLINE_POOL_A = [
+  '成本与履约信号走强，独立站SaaS短期承压',
+  '支付与关税波动叠加，独立站SaaS进入再平衡期',
+  '流量与成本双线变化，独立站SaaS结构正在重塑',
+  '跨境变量升温，独立站SaaS需主动防守利润区间'
+];
+
+const HEADLINE_POOL_B = [
+  '宏观风险升温，独立站SaaS暂未出现结构性冲击',
+  '外部不确定性上行，独立站SaaS先进入预警观察期',
+  '宏观信号偏紧，独立站SaaS当前以监测为主'
+];
+
+function hashIndex(text: string, size: number) {
+  const base = Array.from(text).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return size > 0 ? base % size : 0;
+}
+
+function classifyDirectSignal(item: NewsItem) {
+  const text = `${item.title || ''} ${item.summary || ''}`.toLowerCase();
+  const matched = DIRECT_SIGNAL_KEYWORDS.filter((kw) => text.includes(kw));
+  return { isDirect: matched.length > 0, matched };
+}
+
+function topDimensions(news: NewsItem[]) {
+  const counter: Record<string, number> = {};
+  news.forEach((item) => {
+    const raw = (item.impactDimensions?.[0] || item.moduleTags?.[0] || '生态') as string;
+    const key = DIMENSION_LABELS[raw] || '生态';
+    counter[key] = (counter[key] || 0) + 1;
+  });
+  return Object.keys(counter).sort((a, b) => counter[b] - counter[a]).slice(0, 2);
+}
+
 function buildDailyStrategyBrief(news: NewsItem[]) {
   const todayKey = toUtc8DateKey(Date.now());
   const todayNews = news
@@ -466,88 +515,143 @@ function buildDailyStrategyBrief(news: NewsItem[]) {
     })
     .slice(0, 30);
 
+  const withSignalType = todayNews.map((item) => {
+    const result = classifyDirectSignal(item);
+    return { item, isDirect: result.isDirect, matched: result.matched };
+  });
+  const directSignals = withSignalType.filter((entry) => entry.isDirect);
+  const macroSignals = withSignalType.filter((entry) => !entry.isDirect);
+  const highQuality = withSignalType.filter((entry) => {
+    const summary = String(entry.item.summary || entry.item.aiTldr || '').trim();
+    return summary.length >= 12 && !isLowConfidenceInsight(entry.item);
+  });
   const meta = {
     news_count_scanned: todayNews.length,
-    news_count_used: todayNews.length,
+    news_count_used: highQuality.length,
     generated_at: new Date().toISOString(),
-    data_source: 'news_raw'
-  } as StrategyBrief['meta'] & { data_source: string };
+    data_source: 'news_raw',
+    direct_signal_count: directSignals.length,
+    macro_signal_count: macroSignals.length,
+    only_news_raw: true
+  } as StrategyBrief['meta'] & { data_source: string; direct_signal_count: number; macro_signal_count: number; only_news_raw: true };
 
-  if (!todayNews.length) {
+  if (!highQuality.length) {
+    console.log(
+      `[daily-brief] scanned=${todayNews.length} classified={direct:${directSignals.length},macro:${macroSignals.length}} case=C`
+    );
     return {
-      headline: '今日未找到高影响信号触发独立站SaaS判断',
+      headline: '今日未出现与跨境电商或独立站 SaaS 直接相关的结构性信号，建议维持当前节奏。',
       time_window: '今天',
+      signal_case: 'C',
       top_drivers: [],
       top_news: [],
+      citations: [],
+      transmission_analysis: {
+        macro: '今日宏观层未形成高质量可执行信号。',
+        industry: '跨境电商行业层暂无可确认的直接冲击链路。',
+        saas: '独立站 SaaS 层维持当前节奏，继续监测即可。'
+      },
       actions: [
-        { priority: 'P0', owner: '战略', action: '继续监控今日新闻', expected_effect: '保持预警', time_horizon: '本周' },
-        { priority: 'P1', owner: '产品', action: '确认监控指标正常', expected_effect: '保障可预期', time_horizon: '本月' },
-        { priority: 'P2', owner: '商业化', action: '向客户说明我们持续观察', expected_effect: '增强信心', time_horizon: '本季度' }
+        { priority: 'P0', owner: '战略', action: '保持当日风险雷达巡检', expected_effect: '避免漏报', time_horizon: '本周' },
+        { priority: 'P1', owner: '产品', action: '维持关键链路稳定性检查', expected_effect: '降低突发故障概率', time_horizon: '本月' },
+        { priority: 'P2', owner: '商业化', action: '维持常规客户沟通节奏', expected_effect: '稳住续费预期', time_horizon: '本季度' }
       ],
       meta
     };
   }
 
-  const dimensionCount: Record<string, number> = {};
-  todayNews.forEach((item) => {
-    const key = (item.impactDimensions?.[0] || item.moduleTags?.[0] || '生态') as string;
-    const label = DIMENSION_LABELS[key] || '生态';
-    dimensionCount[label] = (dimensionCount[label] || 0) + 1;
-  });
-  const mainDimension = Object.keys(dimensionCount).sort((a, b) => dimensionCount[b] - dimensionCount[a])[0] || '生态';
-  const hasHighRisk = todayNews.some((item) => item.riskLevel === '高');
-  const headline = `${mainDimension}波动${hasHighRisk ? '负面' : '温和'}影响独立站SaaS${hasHighRisk ? '转化/成本' : '增长/稳定'}表现`;
+  const dominantDimensions = topDimensions(highQuality.map((entry) => entry.item));
+  const hasHighRisk = highQuality.some((entry) => entry.item.riskLevel === '高');
+  const caseType: 'A' | 'B' = directSignals.length > 0 ? 'A' : 'B';
+  const headlinePool = caseType === 'A' ? HEADLINE_POOL_A : HEADLINE_POOL_B;
+  const headline = headlinePool[hashIndex(`${todayKey}-${dominantDimensions.join('-')}-${highQuality.length}`, headlinePool.length)];
 
-  const topDrivers = todayNews.slice(0, 5).map((item) => ({
+  const sourceSet = caseType === 'A' ? directSignals : macroSignals;
+  const driverSource = (sourceSet.length ? sourceSet : withSignalType).slice(0, 5);
+  const topDrivers = driverSource.map(({ item, matched }) => ({
     title: item.title || '标题缺失',
     source: item.source || '未知来源',
     impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
     risk_level: item.riskLevel || '中',
-    why: truncate(item.summary || item.aiTldr || '无摘要', 80)
+    why: truncate(`${item.summary || item.aiTldr || '无摘要'}${matched.length ? `（关键词：${matched.join(', ')}）` : ''}`, 90)
   }));
 
-  const topNews = topDrivers.map((driver, index) => ({
-    id: todayNews[index]?.id || '',
-    title: driver.title,
-    source: driver.source,
-    url: todayNews[index]?.originalUrl || todayNews[index]?.url || '',
-    impact_score: driver.impact_score,
-    risk_level: driver.risk_level,
-    matched_keywords: todayNews[index]?.moduleTags || []
+  const topNews = driverSource.map(({ item, matched }) => ({
+    id: item.id || '',
+    title: item.title || '标题缺失',
+    source: item.source || '未知来源',
+    url: item.originalUrl || item.url || '',
+    impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
+    risk_level: item.riskLevel || '中',
+    matched_keywords: matched.length ? matched : item.moduleTags || []
   }));
 
-  const revenueImpact = {
-    subscription: { direction: '↓', note: '订阅续费面临成本/转化压力' },
-    commission: { direction: '↓', note: '佣金被关税/支付波动侵蚀' },
-    payment: { direction: '→', note: '支付链路需维稳' },
-    ecosystem: { direction: '→', note: '生态维持信任' }
-  };
-
-  const actions: StrategyAction[] = [
-    { priority: 'P0', owner: '战略', action: `${mainDimension}策略回顾并同步客户`, expected_effect: '稳定收入', time_horizon: '本周' },
-    { priority: 'P1', owner: '产品', action: `优化${mainDimension}相关能力（例：支付/风控）`, expected_effect: '提升可靠性', time_horizon: '本月' },
-    { priority: 'P2', owner: '商业化', action: `用${mainDimension}洞察丰富客户沟通`, expected_effect: '巩固信任', time_horizon: '本季度' }
-  ];
-
-  const citations = todayNews.slice(0, 6).map((item) => ({
-    id: item.id,
-    title: item.title,
+  const citations = driverSource.slice(0, 8).map(({ item, matched }) => ({
+    id: item.id || '',
+    title: item.title || '标题缺失',
     source: item.source || '未知来源',
     url: item.originalUrl || item.url || '',
     published_at: item.publishDate || item.createdAt || '',
     impact_score: Number.isFinite(item.impactScore) ? item.impactScore : 0,
     risk_level: item.riskLevel || '中',
-    matched_keywords: item.moduleTags || []
+    matched_keywords: matched.length ? matched : item.moduleTags || []
   }));
+
+  const transmissionAnalysis =
+    caseType === 'A'
+      ? {
+          macro: `宏观层：${hasHighRisk ? '风险升温' : '波动上行'}，政策/成本变量对跨境经营约束增强。`,
+          industry: `行业层：卖家在履约、投放与支付策略上被迫再平衡，GMV与竞争结构短期波动。`,
+          saas: `SaaS层：重点影响${dominantDimensions.join('、')}维度，需要同步调整产品与商业化节奏。`
+        }
+      : {
+          macro: '宏观层：风险信号正在升温，外部环境不确定性增加。',
+          industry: '行业层：当前仅见潜在传导路径（物流成本、消费信心、汇率），尚未形成直接冲击。',
+          saas: 'SaaS层：尚未出现可确认的结构性冲击，建议以预警监测为主。'
+        };
+
+  const revenueImpact =
+    caseType === 'A'
+      ? {
+          subscription: { direction: hasHighRisk ? '↓' : '→', note: '订阅续费面临波动，需要强化价值证明。' },
+          commission: { direction: hasHighRisk ? '↓' : '→', note: '成交与佣金受成本/转化变化牵引。' },
+          payment: { direction: hasHighRisk ? '↓' : '→', note: '支付链路需持续守住成功率与风控平衡。' },
+          ecosystem: { direction: '→', note: '生态协同要跟随外部变化做快速响应。' }
+        }
+      : {
+          subscription: { direction: '→', note: '暂无直接行业冲击，维持观察。' },
+          commission: { direction: '→', note: '佣金结构短期保持稳定。' },
+          payment: { direction: '→', note: '支付链路暂未见直接风险外溢。' },
+          ecosystem: { direction: '→', note: '生态侧以预警为主。' }
+        };
+
+  const actions: StrategyAction[] =
+    caseType === 'A'
+      ? [
+          { priority: 'P0', owner: '战略', action: `围绕${dominantDimensions.join('、')}制定本周风险应对清单`, expected_effect: '降低外部波动对收入冲击', time_horizon: '本周' },
+          { priority: 'P1', owner: '产品', action: '优化支付/履约关键链路的监控与回滚预案', expected_effect: '减少转化损失', time_horizon: '本月' },
+          { priority: 'P2', owner: '商业化', action: '将当日信号转化为客户沟通脚本并分层触达', expected_effect: '稳住续费与扩单预期', time_horizon: '本季度' }
+        ]
+      : [
+          { priority: 'P0', owner: '战略', action: '建立宏观风险周跟踪与触发阈值', expected_effect: '提前预警', time_horizon: '本周' },
+          { priority: 'P1', owner: '产品', action: '保持关键指标监测并预留弹性策略开关', expected_effect: '提高响应速度', time_horizon: '本月' },
+          { priority: 'P2', owner: '商业化', action: '对大客户同步“暂无直接冲击、持续监测”结论', expected_effect: '稳定客户预期', time_horizon: '本季度' }
+        ];
+
+  console.log(
+    `[daily-brief] scanned=${todayNews.length} classified={direct:${directSignals.length},macro:${macroSignals.length}} case=${caseType}`
+  );
 
   return {
     headline,
     time_window: '今天',
+    signal_case: caseType,
     top_drivers: topDrivers,
     top_news: topNews,
+    citations,
+    transmission_analysis: transmissionAnalysis,
     actions,
     impact_on_revenue_model: revenueImpact,
-    citations,
     meta
   };
 }

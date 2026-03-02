@@ -56,6 +56,24 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
           </div>
 
           <div>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">三层风险传导</p>
+            <div className="mt-3 grid gap-2">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
+                <p className="text-[11px] text-slate-400">宏观层</p>
+                <p className="mt-1">{brief.transmission_analysis?.macro || '暂无宏观层结论'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
+                <p className="text-[11px] text-slate-400">行业层</p>
+                <p className="mt-1">{brief.transmission_analysis?.industry || '暂无行业层结论'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 text-xs text-slate-200">
+                <p className="text-[11px] text-slate-400">SaaS层</p>
+                <p className="mt-1">{brief.transmission_analysis?.saas || '暂无 SaaS 层结论'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div>
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">SaaS 影响拆解</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {Object.entries(brief.impact_on_revenue_model || {}).map(([key, info]) => (
