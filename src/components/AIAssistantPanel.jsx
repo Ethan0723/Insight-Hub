@@ -109,6 +109,29 @@ function formatExecutiveSummaryText(text) {
   const riskItems = toNumberedItems(risk);
   const revenueItems = toNumberedItems(revenue);
   const priorityItems = toNumberedItems(priority);
+  const hasAnyStructuredSection = Boolean(risk || revenue || priority);
+
+  if (!hasAnyStructuredSection) {
+    const lines = normalized
+      .split(/[。；;\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const a = lines.slice(0, 3);
+    const b = lines.slice(3, 6);
+    const c = lines.slice(6, 10);
+    return [
+      '跨境 SaaS 战略摘要',
+      '',
+      '外部风险信号：',
+      ...(a.length ? a : ['暂无可提炼信号']).map((item, idx) => `${idx + 1}. ${item}`),
+      '',
+      '收入结构影响：',
+      ...(b.length ? b : ['暂无明确结构性变化']).map((item, idx) => `${idx + 1}. ${item}`),
+      '',
+      '优先方向：',
+      ...(c.length ? c : ['先执行最小可逆动作并跟踪核心指标']).map((item, idx) => `${idx + 1}. ${item}`)
+    ].join('\n');
+  }
 
   const blocks = [];
   blocks.push('跨境 SaaS 战略摘要');
@@ -523,6 +546,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
   const submitQuestion = async (rawQuestion, options = {}) => {
     const question = String(rawQuestion || '').trim();
     const isSample = Boolean(options.isSample);
+    const isSummaryQuestion = !isSample && isNewsSummaryQuestion(question);
     if (!question) return;
 
     const userMessage = { id: `u-${Date.now()}`, role: 'user', text: question };
@@ -554,17 +578,19 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
         setMessages((prev) =>
           prev.map((item) => (item.id === assistantId ? { ...item, text: answer.text, sources: answer.sources, pending: false } : item))
         );
-      } else if (isNewsSummaryQuestion(question)) {
+      } else if (isSummaryQuestion) {
         const newsItems = pickRecentNewsItems(news, 7, 12);
         if (newsItems.length === 0) {
           throw new Error('no_recent_news');
         }
+        let summaryRawBuffer = '';
         await streamNewsSummary(newsItems, {
           onToken: (token) => {
+            summaryRawBuffer += token;
             setMessages((prev) =>
               prev.map((item) =>
                 item.id === assistantId
-                  ? { ...item, text: formatExecutiveSummaryText(`${item.text}${token}`) }
+                  ? { ...item, text: sanitizePlainText(summaryRawBuffer) }
                   : item
               )
             );
@@ -574,7 +600,17 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           }
         });
 
-        setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, pending: false } : item)));
+        setMessages((prev) =>
+          prev.map((item) =>
+            item.id === assistantId
+              ? {
+                  ...item,
+                  text: formatExecutiveSummaryText(summaryRawBuffer),
+                  pending: false
+                }
+              : item
+          )
+        );
       } else {
         await streamAiChat(
           {
@@ -631,7 +667,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
             ? {
                 ...item,
                 text:
-                  !isSample && isNewsSummaryQuestion(question)
+                  isSummaryQuestion
                     ? formatExecutiveSummaryText(item.text || fallbackText)
                     : formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
                 sources: item.sources && item.sources.length > 0 ? item.sources : fallbackSources,
