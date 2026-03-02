@@ -73,25 +73,24 @@ function ImpactCell({ title, data, detail, expanded, onToggle }) {
   const direction = safeText(data?.direction, "→");
   const note = safeText(data?.note, "暂无影响结论");
   const short = note.length > 16 ? `${note.slice(0, 16)}…` : note;
-  const variable = detail ? safeText(detail) : note;
+  const fullDetail = detail ? safeText(detail) : note;
   const tag = direction === "↑" ? "上行" : direction === "↓" ? "下行" : "中性";
 
   return (
-    <article className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-3">
+    <article className="rounded-xl border border-slate-700/60 bg-slate-900/75 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">{title}</p>
         <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[10px] text-cyan-200">{tag}</span>
       </div>
-      <p className="mt-2 text-sm font-medium text-slate-100">{short}</p>
-      <p className="mt-1 text-xs text-slate-400" style={clamp(1)}>关键变量：{variable}</p>
+      <p className="mt-1.5 text-xs font-medium text-slate-100" style={clamp(1)}>{short}</p>
       <button
         type="button"
         onClick={onToggle}
-        className="mt-2 text-[11px] text-cyan-200 underline-offset-4 hover:underline"
+        className="mt-1.5 text-[11px] text-cyan-200 underline-offset-4 hover:underline"
       >
         {expanded ? "收起分析" : "展开分析"}
       </button>
-      {expanded ? <p className="mt-2 text-xs leading-5 text-slate-300">{variable}</p> : null}
+      {expanded ? <p className="mt-1.5 text-xs leading-5 text-slate-300">{fullDetail}</p> : null}
     </article>
   );
 }
@@ -99,12 +98,8 @@ function ImpactCell({ title, data, detail, expanded, onToggle }) {
 function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const [driversExpanded, setDriversExpanded] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
+  const [citationCardsOpen, setCitationCardsOpen] = useState(false);
   const [impactOpenKey, setImpactOpenKey] = useState("");
-  const [actionsExpanded, setActionsExpanded] = useState({
-    "24-72h": false,
-    "1-2w": false,
-    "本月": false,
-  });
 
   const brief = strategyBrief || {
     headline: "今日未发现高影响信号",
@@ -128,7 +123,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
       "仅基于 news_raw",
       `扫描 ${brief?.meta?.news_count_scanned || 0} 条`,
       `引用 ${brief?.meta?.news_count_used || 0} 条`,
-      safeText(brief?.time_window, "今天")
+      safeText(brief?.time_window, "今天"),
     ],
     [brief]
   );
@@ -155,21 +150,21 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const impactModel = brief?.impact_on_revenue_model || {};
 
   return (
-    <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-5 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-6">
-      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/75 p-4 lg:p-5">
+    <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-4 shadow-[0_0_45px_rgba(56,189,248,0.12)] backdrop-blur-xl lg:p-5">
+      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/75 p-3.5 lg:p-4">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">AI 今日战略判断</p>
-        <h3 className="mt-2 text-2xl font-semibold text-slate-100" style={clamp(1)}>{safeText(brief.headline, "今日暂无清晰结论")}</h3>
-        <p className="mt-2 text-sm text-slate-300" style={clamp(2)}>{safeText(brief.one_liner, "暂无结论解释")}</p>
+        <h3 className="mt-1.5 text-2xl font-semibold text-slate-100" style={clamp(1)}>{safeText(brief.headline, "今日暂无清晰结论")}</h3>
+        <p className="mt-1.5 text-sm text-slate-300" style={clamp(1)}>{safeText(brief.one_liner, "暂无结论解释")}</p>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {chips.slice(0, 4).map((chip) => (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          {chips.slice(0, 3).map((chip) => (
             <span key={chip} className="rounded-full border border-slate-700/80 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300">
               {chip}
             </span>
           ))}
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => document.getElementById("strategic-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}
@@ -190,8 +185,8 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-        <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+      <div className="mt-3 grid gap-3 xl:grid-cols-[1.25fr_1fr]">
+        <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">今日驱动</p>
             {sortedDrivers.length > 3 ? (
@@ -205,22 +200,18 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
             ) : null}
           </div>
 
-          <div className="mt-3 grid gap-2">
+          <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
             {shownDrivers.length ? shownDrivers.map((driver, idx) => (
-              <article key={`${safeText(driver?.title, "driver")}-${idx}`} className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3">
-                <p className="text-[11px] text-slate-400">
-                  {safeText(driver?.source, "LLM综合")} · 影响分 {Number(driver?.impact_score || 0)} · 风险 {safeText(driver?.risk_level, "中")}
-                </p>
-                <p className="mt-1 text-sm font-medium text-slate-100" style={clamp(1)}>{safeText(driver?.title, "未命名驱动")}</p>
-                <p className="mt-1 text-xs text-slate-400" style={clamp(2)}>为何重要：{safeText(driver?.why, "暂无说明")}</p>
+              <article key={`${safeText(driver?.title, "driver")}-${idx}`} className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-2.5 py-2">
+                <p className="text-xs font-medium text-slate-100" style={clamp(1)}>{safeText(driver?.title, "未命名驱动")}</p>
               </article>
             )) : <p className="text-xs text-slate-400">暂未识别今日驱动因素。</p>}
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+        <section className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">SaaS 影响拆解</p>
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {[
               ["subscription", "订阅", impactDetail?.merchant_demand],
               ["commission", "佣金", impactDetail?.acquisition],
@@ -240,111 +231,90 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         </section>
       </div>
 
-      <section id="strategic-actions" className="mt-4 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+      <section id="strategic-actions" className="mt-3 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">Action Board</p>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
           {[
             ["24-72h", groupedActions["24-72h"]],
             ["1-2w", groupedActions["1-2w"]],
             ["本月", groupedActions["本月"]],
           ].map(([bucket, items]) => {
             const list = Array.isArray(items) ? items : [];
-            const expanded = actionsExpanded[bucket];
-            const shown = expanded ? list : list.slice(0, 3);
+            const first = list[0];
 
             return (
-              <div key={bucket} className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-100">{bucket}</p>
-                  {list.length > 3 ? (
-                    <button
-                      type="button"
-                      onClick={() => setActionsExpanded((prev) => ({ ...prev, [bucket]: !prev[bucket] }))}
-                      className="text-[11px] text-cyan-200 underline-offset-4 hover:underline"
-                    >
-                      {expanded ? "收起" : "展开全部"}
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2">
-                  {shown.length ? shown.map((action, idx) => (
-                    <article key={`${bucket}-${idx}`} className="rounded-lg border border-slate-700/70 bg-slate-950/80 p-2.5">
-                      <p className="text-[11px] text-slate-400">{safeText(action.priority)} · {safeText(action.owner)} · {safeText(action.time_horizon, bucket)}</p>
-                      <p className="mt-1 text-xs text-slate-100" style={clamp(2)}>{safeText(action.action)}</p>
-                      <p className="mt-1 text-[11px] text-slate-500" style={clamp(1)}>指标：{safeText(action.expected_effect, "待补充")}</p>
-                    </article>
-                  )) : <p className="text-xs text-slate-400">暂无行动建议。</p>}
-                </div>
+              <div key={bucket} className="rounded-lg border border-slate-700/60 bg-slate-900/70 p-2">
+                <p className="text-xs font-medium text-slate-100">{bucket}</p>
+                {first ? (
+                  <article className="mt-1.5 rounded-md border border-slate-700/70 bg-slate-950/80 px-2 py-1.5">
+                    <p className="text-[10px] text-slate-400">{safeText(first.priority)} · {safeText(first.owner)}</p>
+                    <p className="mt-0.5 text-xs text-slate-100" style={clamp(2)}>{safeText(first.action)}</p>
+                  </article>
+                ) : <p className="mt-1.5 text-xs text-slate-400">暂无行动建议。</p>}
               </div>
             );
           })}
         </div>
       </section>
 
-      <section className="mt-4 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+      <section className="mt-3 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">引用新闻</p>
           <button
             type="button"
-            onClick={() => setCitationsOpen(true)}
+            onClick={() => setCitationsOpen((v) => !v)}
             className="text-xs text-cyan-200 underline-offset-4 hover:underline"
           >
-            查看全部引用新闻（{sortedCitations.length}）
+            {citationsOpen ? "收起" : `展开列表（${sortedCitations.length}）`}
           </button>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {sortedCitations.slice(0, 3).map((item, idx) => (
-            <a
-              key={`${safeText(item?.id, `cite-${idx}`)}-${idx}`}
-              href={safeText(item?.url, "#")}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3 transition hover:border-cyan-300/40"
-            >
-              <p className="text-[11px] text-slate-400">{safeText(item?.source, "Unknown")} · 影响 {Number(item?.impact_score || 0)} / 风险 {safeText(item?.risk_level, "中")}</p>
-              <p className="mt-1 text-sm font-medium text-slate-100" style={clamp(2)}>{getCiteTitle(item)}</p>
-              <p className="mt-1 text-xs text-slate-400" style={clamp(2)}>{getCitationSummary(item, brief.one_liner)}</p>
-            </a>
-          ))}
-          {!sortedCitations.length ? <p className="text-xs text-slate-400">今日暂无引用新闻。</p> : null}
-        </div>
-      </section>
-
-      {citationsOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
-          <div className="max-h-[86vh] w-full max-w-4xl overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-950 sm:rounded-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-              <h4 className="text-sm font-semibold text-slate-100">全部引用新闻（{sortedCitations.length}）</h4>
-              <button
-                type="button"
-                onClick={() => setCitationsOpen(false)}
-                className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
-              >
-                关闭
-              </button>
-            </div>
-            <div className="max-h-[76vh] space-y-2 overflow-y-auto px-4 py-3">
+        {citationsOpen ? (
+          <div className="mt-2">
+            <ul className="list-disc space-y-1 pl-4">
               {sortedCitations.map((item, idx) => (
-                <a
-                  key={`${safeText(item?.id, `modal-cite-${idx}`)}-${idx}`}
-                  href={safeText(item?.url, "#")}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-xl border border-slate-800 bg-slate-900/70 p-3 transition hover:border-cyan-300/40"
-                >
-                  <p className="text-[11px] text-slate-400">{safeText(item?.source, "Unknown")} · 影响 {Number(item?.impact_score || 0)} / 风险 {safeText(item?.risk_level, "中")}</p>
-                  <p className="mt-1 text-sm font-medium text-slate-100" style={clamp(2)}>{getCiteTitle(item)}</p>
-                  <p className="mt-1 text-xs text-slate-400" style={clamp(2)}>{getCitationSummary(item, brief.one_liner)}</p>
-                </a>
+                <li key={`${safeText(item?.id, `cite-${idx}`)}-${idx}`} className="text-xs text-slate-300">
+                  <span className="text-slate-400">{safeText(item?.source, "Unknown")}：</span>
+                  <a
+                    href={safeText(item?.url, "#")}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline-offset-4 hover:text-cyan-200 hover:underline"
+                  >
+                    {getCiteTitle(item)}
+                  </a>
+                </li>
               ))}
-            </div>
+            </ul>
+            <button
+              type="button"
+              onClick={() => setCitationCardsOpen((v) => !v)}
+              className="mt-2 text-xs text-cyan-200 underline-offset-4 hover:underline"
+            >
+              {citationCardsOpen ? "收起原卡片内容" : "展开原卡片内容"}
+            </button>
+            {citationCardsOpen ? (
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {sortedCitations.map((item, idx) => (
+                  <a
+                    key={`${safeText(item?.id, `detail-cite-${idx}`)}-${idx}`}
+                    href={safeText(item?.url, "#")}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3 transition hover:border-cyan-300/40"
+                  >
+                    <p className="text-[11px] text-slate-400">{safeText(item?.source, "Unknown")} · 风险 {safeText(item?.risk_level, "中")}</p>
+                    <p className="mt-1 text-sm font-medium text-slate-100" style={clamp(2)}>{getCiteTitle(item)}</p>
+                    <p className="mt-1 text-xs text-slate-400" style={clamp(2)}>{getCitationSummary(item, brief.one_liner)}</p>
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : null}
-
-      <section className="mt-4 rounded-2xl border border-slate-700/60 bg-slate-950/50 p-4">
+        ) : null}
+        {!sortedCitations.length ? <p className="mt-2 text-xs text-slate-400">今日暂无引用新闻。</p> : null}
+      </section>
+      <section className="mt-3 rounded-2xl border border-slate-700/60 bg-slate-950/50 p-4">
         <div className="flex items-center justify-between">
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">指数明细</p>
           <button
