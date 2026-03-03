@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { streamNewsSummary } from '../../services/ai';
+import { track } from '../../lib/analytics';
 
 function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibraryByIds }) {
   const [summary, setSummary] = useState('');
@@ -110,6 +111,15 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
                     href={news.originalUrl}
                     target="_blank"
                     rel="noreferrer"
+                    onClick={() => {
+                      let domain = '';
+                      try {
+                        domain = news?.originalUrl ? new URL(news.originalUrl).hostname : '';
+                      } catch {
+                        domain = '';
+                      }
+                      track('citation_click', { news_id: String(news?.id || ''), domain });
+                    }}
                     className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
                   >
                     打开原文

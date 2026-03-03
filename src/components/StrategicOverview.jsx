@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import DriversPanel, { buildDriverItems } from "./strategy/DriversPanel";
 import ExpandableText from "./strategy/ExpandableText";
+import { track } from "../lib/analytics";
 
 const safeText = (value, fallback = "") => {
   const text = String(value || "").trim();
@@ -102,7 +103,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
     : "来源：news_raw";
 
   return (
-    <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-3 shadow-[0_0_32px_rgba(56,189,248,0.10)] backdrop-blur-xl lg:p-3.5">
+    <section data-ga-section="overview" className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-3 shadow-[0_0_32px_rgba(56,189,248,0.10)] backdrop-blur-xl lg:p-3.5">
       <div className="rounded-2xl border border-slate-700/70 bg-slate-950/75 p-3">
         <div className="grid gap-2 md:grid-cols-[1fr_auto] md:items-start">
           <div className="min-w-0">
@@ -128,7 +129,13 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         <div className="mt-2 flex flex-wrap justify-end gap-1.5">
           <button
             type="button"
-            onClick={() => onOpenEvidence({ title: "战略证据", newsIds: (indexes || []).flatMap((i) => i?.evidence?.newsIds || []) })}
+            onClick={() =>
+              onOpenEvidence({
+                title: "战略证据",
+                newsIds: (indexes || []).flatMap((i) => i?.evidence?.newsIds || []),
+                source: "daily_brief"
+              })
+            }
             className="rounded-md border border-slate-600 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
           >
             查看证据
@@ -139,7 +146,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
       <div className="mt-2 grid gap-2 xl:grid-cols-[1.15fr_1fr]">
         <DriversPanel drivers={drivers} />
 
-        <section className="rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
+        <section data-ga-section="impacts" className="rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">SaaS 影响拆解</p>
           <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {impactGrid.map((item) => (
@@ -157,11 +164,22 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         </section>
       </div>
 
-      <section id="strategic-actions" className="mt-2 rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
+      <section id="strategic-actions" data-ga-section="actions" className="mt-2 rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">优先行动</p>
         <div className="mt-1.5 grid gap-1.5 md:grid-cols-3">
           {actions.map((item) => (
-            <article key={item.priority} className="rounded-md border border-slate-700/60 bg-slate-900/75 p-2">
+            <article
+              key={item.priority}
+              data-action-priority={item.priority}
+              className="rounded-md border border-slate-700/60 bg-slate-900/75 p-2"
+              onClick={() =>
+                track('action_item_click', {
+                  priority: item.priority,
+                  owner: item.owner,
+                  timeframe: item.timeframe
+                })
+              }
+            >
               <p className="text-[11px] text-slate-400">{item.priority} · {item.timeframe} · Owner：{item.owner}</p>
               <div className="mt-1 max-h-28 overflow-auto strategic-scroll pr-1">
                 <ExpandableText text={item.action} collapsedChars={150} className="text-[12px] leading-snug text-slate-100" />
@@ -171,7 +189,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
         </div>
       </section>
 
-      <section className="mt-2 rounded-xl border border-slate-700/60 bg-slate-950/55 p-2.5">
+      <section data-ga-section="kpi" className="mt-2 rounded-xl border border-slate-700/60 bg-slate-950/55 p-2.5">
         <div className="flex items-center justify-between">
           <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">战略指标</p>
           <button
@@ -215,7 +233,25 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
           <ul className="mt-1.5 grid gap-1.5 md:grid-cols-2">
             {citations.slice(0, 3).map((news, idx) => (
               <li key={`${safeText(news?.id, `cite-${idx}`)}-${idx}`} className="rounded border border-slate-700/50 bg-slate-900/70 p-2">
-                <a href={safeText(news?.url, "#")} target="_blank" rel="noreferrer" className="text-[11px] text-slate-300 hover:text-cyan-200 whitespace-normal break-words">
+                <a
+                  href={safeText(news?.url, "#")}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => {
+                    const href = safeText(news?.url, '');
+                    let domain = '';
+                    try {
+                      domain = href ? new URL(href).hostname : '';
+                    } catch {
+                      domain = '';
+                    }
+                    track('citation_click', {
+                      news_id: safeText(news?.id, ''),
+                      domain
+                    });
+                  }}
+                  className="text-[11px] text-slate-300 hover:text-cyan-200 whitespace-normal break-words"
+                >
                   <span className="text-slate-400">{safeText(news?.source, "Unknown")}：</span>
                   {safeText(news?.title, "来源条目（标题缺失）")}
                 </a>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import MethodPopover from './ui/MethodPopover';
+import { track } from '../lib/analytics';
 
 const DIMENSIONS = [
   { id: 'subscription', name: '订阅价格' },
@@ -116,7 +117,7 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
   };
 
   return (
-    <section className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+    <section data-ga-section="sandbox" className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
         <div className="flex items-center gap-2">
@@ -297,6 +298,15 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                     href={item.originalUrl}
                     target="_blank"
                     rel="noreferrer"
+                    onClick={() => {
+                      let domain = '';
+                      try {
+                        domain = item?.originalUrl ? new URL(item.originalUrl).hostname : '';
+                      } catch {
+                        domain = '';
+                      }
+                      track('citation_click', { news_id: String(item?.id || ''), domain });
+                    }}
                     className="mt-1 inline-block text-[11px] text-cyan-200 hover:underline"
                   >
                     打开原文

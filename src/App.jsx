@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import NewsLibraryPage from './pages/NewsLibraryPage';
 import { api } from './services/api';
 import { storage } from './services/storage';
+import { track, trackPageView, trackSectionView } from './lib/analytics';
 
 const defaultScenario = {
   arpuDelta: 0,
@@ -50,6 +51,7 @@ function App() {
     offsetX: 0,
     offsetY: 0
   });
+  const observedSectionsRef = useRef(new Set());
 
   useEffect(() => {
     let mounted = true;
@@ -82,6 +84,37 @@ function App() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const basePath = window.location.pathname || '/';
+    const pagePath = activeNav === 'overview' ? basePath : `${basePath}#${activeNav}`;
+    trackPageView(pagePath);
+  }, [activeNav]);
+
+  useEffect(() => {
+    const sectionElements = Array.from(document.querySelectorAll('[data-ga-section]'));
+    if (!sectionElements.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.4) return;
+          const section = String(entry.target.getAttribute('data-ga-section') || '').trim();
+          if (!section || observedSectionsRef.current.has(section)) return;
+          observedSectionsRef.current.add(section);
+          trackSectionView(section);
+          if (section === 'actions') {
+            const actionCount = document.querySelectorAll('[data-action-priority]').length || 0;
+            track('action_board_open', { count: actionCount });
+          }
+        });
+      },
+      { threshold: [0.4] }
+    );
+
+    sectionElements.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [activeNav, insight, newsBase, scoreBreakdown]);
 
   useEffect(() => {
     let mounted = true;
@@ -189,9 +222,32 @@ function App() {
     }, 10);
   };
 
+  const onToggleAIPanel = () => {
+    setAiPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        track('ai_panel_open', { entry: 'button' });
+      }
+      return next;
+    });
+  };
+
+  const inferEvidenceSource = (evidence) => {
+    const source = String(evidence?.source || '').trim();
+    if (source === 'daily_brief' || source === 'news_raw') return source;
+    const id = String(evidence?.id || '').toLowerCase();
+    const title = String(evidence?.title || '').toLowerCase();
+    if (id.includes('brief') || title.includes('战略')) return 'daily_brief';
+    return 'news_raw';
+  };
+
   const onOpenEvidence = (evidence) => {
     setEvidenceData({ title: evidence.title, newsIds: evidence.newsIds });
     setEvidenceOpen(true);
+    track('evidence_open', {
+      source: inferEvidenceSource(evidence),
+      count: Array.isArray(evidence?.newsIds) ? evidence.newsIds.length : 0
+    });
   };
 
   const onOpenLibraryByIds = (ids) => {
@@ -241,7 +297,8 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
 
-      <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={() => setAiPanelOpen((v) => !v)} />
+      <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={onToggleAIPanel} />
+
 
       <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8">
         {activeNav === 'library' ? (
@@ -278,7 +335,10 @@ function App() {
       {!aiPanelOpen ? (
         <button
           type="button"
-          onClick={() => setAiPanelOpen(true)}
+          onClick={() => {
+            setAiPanelOpen(true);
+            track('ai_panel_open', { entry: 'button' });
+          }}
           onPointerDown={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             dragStateRef.current = {
@@ -293,6 +353,7 @@ function App() {
           onPointerUp={() => {
             if (!dragStateRef.current.moved) {
               setAiPanelOpen(true);
+              track('ai_panel_open', { entry: 'button' });
             }
           }}
           style={{

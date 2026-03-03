@@ -59,7 +59,7 @@ function DriversPanel({ drivers = [] }) {
   const shown = drivers.slice(0, 5);
 
   return (
-    <section className="rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
+    <section data-ga-section="drivers" className="rounded-xl border border-slate-700/70 bg-slate-950/70 p-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">核心变量 / 今日驱动</p>
       </div>

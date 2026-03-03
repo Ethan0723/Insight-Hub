@@ -50,10 +50,29 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 暴露指数用于优先级排序（P0/P1/P2/P3）
 
 ### 2.5 数据分析埋点（GA）
-- 已接入 Google Analytics 4（GA4）
-- 前端启动时自动初始化 `gtag` 并上报基础访问行为（页面访问/会话）
-- 支持通过 `VITE_GA_ID` 切换到正式 Measurement ID
-- 可作为比赛“可量化运营闭环”能力：支持后续补充关键事件（如 AI 助手提问、查看证据、行动板点击）
+- 已接入 Google Analytics 4（GA4），Measurement ID 由 `VITE_GA_ID` 提供。
+- SPA 手动上报 `page_view`（`send_page_view=false`），避免重复统计。
+- 事件封装位于 `src/lib/analytics.ts`，未配置 `VITE_GA_ID` 时自动 no-op，不影响页面功能。
+- 当前事件清单（用于“可量化运营闭环”）：
+  - `ai_panel_open`：AI 助手打开入口（button/hotkey/auto）
+  - `ai_example_click`：固定示例问题点击（q1/q2/q3）
+  - `ai_ask_submit`：自由提问提交（仅上报 `input_len`）
+  - `evidence_open`：证据抽屉打开（来源 + 引用数量）
+  - `citation_click`：引用链接点击（`news_id/domain`）
+  - `action_board_open`：行动板进入视图（行动条数）
+  - `action_item_click`：行动项点击（priority/owner/timeframe）
+  - `section_view`：核心模块曝光（overview/drivers/impacts/actions/kpi/sandbox）
+- 隐私约束：不上传用户原始提问、不上传新闻正文，仅上传长度、枚举、计数等非敏感字段。
+
+GA Realtime 验证步骤：
+1. 本地或测试环境设置 `.env`：`VITE_GA_ID=<你的 GA4 Measurement ID>`。
+2. 启动前端并访问页面，打开 GA4 `Reports -> Realtime`。
+3. 在页面执行一次完整链路：
+   - 打开 AI 助手 -> 点击示例问题 -> 提交自由问题
+   - 打开“查看证据”并点击一条引用链接
+   - 滚动浏览总览模块（drivers/impacts/actions/kpi）与收入沙盘
+4. 在 Realtime 的 `Event count by Event name` 确认出现上述事件名。
+5. 点进单个事件，核对参数是否符合预期（如 `q_id`、`input_len`、`section`、`priority`）。
 
 ---
 

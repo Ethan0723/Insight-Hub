@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { streamAiChat, streamNewsSummary } from '../services/ai';
+import { track } from '../lib/analytics';
 
 const DIMENSION_META = {
   subscription: { label: '订阅价格', short: '模板订阅' },
@@ -9,9 +10,9 @@ const DIMENSION_META = {
 };
 
 const FIXED_SAMPLE_QUESTIONS = [
-  '当前结论中，最值得质疑的假设是什么？',
-  '如果只能保留一个行动，应该保留哪一个？为什么？',
-  '在当前判断下，最容易被低估的风险是什么？'
+  { id: 'q1', text: '当前结论中，最值得质疑的假设是什么？' },
+  { id: 'q2', text: '如果只能保留一个行动，应该保留哪一个？为什么？' },
+  { id: 'q3', text: '在当前判断下，最容易被低估的风险是什么？' }
 ];
 
 function parseMaybeJson(value, fallback) {
@@ -518,6 +519,15 @@ function AssistantBubble({ message, onOpenEvidence }) {
                   href={src.url}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={() => {
+                    let domain = '';
+                    try {
+                      domain = src?.url ? new URL(src.url).hostname : '';
+                    } catch {
+                      domain = '';
+                    }
+                    track('citation_click', { domain });
+                  }}
                   className="block text-[11px] text-slate-300 hover:text-cyan-200"
                 >
                   [{idx + 1}] {src.published_at || ''} {src.source || ''} {src.title}
@@ -606,8 +616,15 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
   const submitQuestion = async (rawQuestion, options = {}) => {
     const question = String(rawQuestion || '').trim();
     const isSample = Boolean(options.isSample);
+    const sampleId = String(options.sampleId || '').trim();
     const isSummaryQuestion = !isSample && isNewsSummaryQuestion(question);
     if (!question) return;
+
+    if (isSample && sampleId) {
+      track('ai_example_click', { q_id: sampleId });
+    } else if (!isSample) {
+      track('ai_ask_submit', { input_len: question.length });
+    }
 
     const userMessage = { id: `u-${Date.now()}`, role: 'user', text: question };
     const assistantId = `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -759,12 +776,12 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           <div className="mt-4 space-y-2">
             {FIXED_SAMPLE_QUESTIONS.map((question) => (
               <button
-                key={question}
+                key={question.id}
                 type="button"
-                onClick={() => submitQuestion(question, { isSample: true })}
+                onClick={() => submitQuestion(question.text, { isSample: true, sampleId: question.id })}
                 className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-left text-xs text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200"
               >
-                {question}
+                {question.text}
               </button>
             ))}
           </div>
