@@ -2,8 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildContext, searchNewsRaw } from './news_search.mjs';
-import { generateDbOnlyAnswer, splitIntoStreamTokens } from './rag_chat.mjs';
+import { searchNewsRaw } from './news_search.mjs';
 
 const PORT = Number(process.env.PORT || 8787);
 const MODEL = process.env.LLM_MODEL || 'bedrock-claude-4-5-sonnet';
@@ -198,6 +197,369 @@ function endSse(res) {
   res.end();
 }
 
+function safeJsonParse(text, fallback = null) {
+  try {
+    const parsed = JSON.parse(String(text || ''));
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function sanitizeLine(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[#*`>-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDomain(url) {
+  try {
+    return new URL(String(url || '')).hostname || '';
+  } catch {
+    return '';
+  }
+}
+
+async function callLlmOnce({ messages, temperature = 0.2, maxTokens = 1200 }) {
+  const upstream = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${API_KEY}`
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      stream: false,
+      temperature,
+      max_tokens: maxTokens,
+      messages
+    })
+  });
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    throw new Error(`llm failed ${upstream.status}: ${text.slice(0, 220)}`);
+  }
+  const parsed = safeJsonParse(text, {});
+  const content = String(parsed?.choices?.[0]?.message?.content || '').trim();
+  if (!content) {
+    throw new Error('llm returned empty content');
+  }
+  return content;
+}
+
+function heuristicRoute(question) {
+  const q = String(question || '').toLowerCase();
+  const dailyBriefPatterns = [
+    '最值得质疑', '只能保留一个行动', '低估的风险', '假设', '质疑', '行动', '为什么'
+  ];
+  if (dailyBriefPatterns.some((p) => q.includes(p))) return 'DAILY_BRIEF_QA';
+  const topicPatterns = [
+    '支付', '合规', '物流', '关税', 'shopify', 'amazon', 'tiktok', 'temu', '佣金', '转化', '履约'
+  ];
+  if (topicPatterns.some((p) => q.includes(p))) return 'NEWS_SEARCH';
+  return 'TOP_N_FALLBACK';
+}
+
+async function planQuery(question) {
+  const plannerPrompt = `
+你是 Query Planner。请根据用户问题输出严格 JSON，不要 Markdown。
+输出结构：
+{
+  "route":"DAILY_BRIEF_QA|NEWS_SEARCH|TOP_N_FALLBACK",
+  "time_window":"7d|30d|180d",
+  "topic_tags":["..."],
+  "query_expansion":["..."],
+  "top_n":8
+}
+判定规则：
+- 战略反思/质疑/只保留一个行动/低估风险 => DAILY_BRIEF_QA
+- 主题检索（支付/合规/物流/关税/平台等）=> NEWS_SEARCH
+- 泛问（今天关注什么/总结重点）或高概率低命中 => TOP_N_FALLBACK
+只返回 JSON。
+用户问题：${question}
+`.trim();
+  try {
+    const content = await callLlmOnce({
+      messages: [
+        { role: 'system', content: '你是严格JSON输出器。' },
+        { role: 'user', content: plannerPrompt }
+      ],
+      temperature: 0.1,
+      maxTokens: 320
+    });
+    const parsed = safeJsonParse(content, null);
+    if (!parsed || typeof parsed !== 'object') throw new Error('invalid planner json');
+    const route = ['DAILY_BRIEF_QA', 'NEWS_SEARCH', 'TOP_N_FALLBACK'].includes(String(parsed.route))
+      ? String(parsed.route)
+      : heuristicRoute(question);
+    const timeWindow = ['7d', '30d', '180d'].includes(String(parsed.time_window))
+      ? String(parsed.time_window)
+      : '30d';
+    const topN = Math.min(Math.max(Number(parsed.top_n) || 8, 3), 12);
+    const topicTags = Array.isArray(parsed.topic_tags) ? parsed.topic_tags.map((s) => sanitizeLine(s)).filter(Boolean).slice(0, 8) : [];
+    const queryExpansion = Array.isArray(parsed.query_expansion)
+      ? parsed.query_expansion.map((s) => sanitizeLine(s)).filter(Boolean).slice(0, 6)
+      : [];
+    return { route, time_window: timeWindow, topic_tags: topicTags, query_expansion: queryExpansion, top_n: topN };
+  } catch {
+    return { route: heuristicRoute(question), time_window: '30d', topic_tags: [], query_expansion: [], top_n: 8 };
+  }
+}
+
+async function fetchLatestDailyBrief() {
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/daily_brief`);
+  upstreamUrl.searchParams.set(
+    'select',
+    'id,brief_date,headline,one_liner,top_drivers,impacts,actions,citations,generated_at'
+  );
+  upstreamUrl.searchParams.set('order', 'generated_at.desc');
+  upstreamUrl.searchParams.set('limit', '1');
+  const upstream = await fetch(upstreamUrl.toString(), {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+  const text = await upstream.text();
+  if (!upstream.ok) throw new Error(`daily_brief failed ${upstream.status}: ${text.slice(0, 160)}`);
+  const rows = safeJsonParse(text, []);
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+function normalizeCitationsFromBrief(brief, allDocs = []) {
+  const ids = [];
+  if (Array.isArray(brief?.citations)) {
+    brief.citations.forEach((c) => {
+      const v = String(c || '').trim();
+      if (v) ids.push(v);
+    });
+  }
+  const byId = new Map(allDocs.map((d) => [String(d.id || '').trim(), d]));
+  const output = [];
+  ids.forEach((id) => {
+    const hit = byId.get(id);
+    if (hit) {
+      output.push({
+        id: String(hit.id || ''),
+        title: sanitizeLine(hit.title),
+        url: String(hit.url || ''),
+        source: sanitizeLine(hit.source),
+        published_at: String(hit.published_at || '')
+      });
+    } else if (/^https?:\/\//i.test(id)) {
+      output.push({
+        id: '',
+        title: extractDomain(id) || '来源链接',
+        url: id,
+        source: extractDomain(id),
+        published_at: ''
+      });
+    }
+  });
+  return output.slice(0, 10);
+}
+
+async function fetchTopNews({ days = 7, limit = 8 }) {
+  const cutoff = new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000).toISOString();
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
+  upstreamUrl.searchParams.set('select', 'id,title,url,source,publish_time,created_at,summary,impact_score,risk_level');
+  upstreamUrl.searchParams.set('or', `(publish_time.gte.${cutoff},created_at.gte.${cutoff})`);
+  upstreamUrl.searchParams.set('order', 'impact_score.desc.nullslast,publish_time.desc.nullslast,created_at.desc');
+  upstreamUrl.searchParams.set('limit', String(Math.min(Math.max(limit, 3), 12)));
+  const upstream = await fetch(upstreamUrl.toString(), {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+  const text = await upstream.text();
+  if (!upstream.ok) throw new Error(`top news failed ${upstream.status}: ${text.slice(0, 160)}`);
+  const rows = safeJsonParse(text, []);
+  return (Array.isArray(rows) ? rows : []).map((r) => ({
+    id: r.id,
+    title: sanitizeLine(r.title),
+    url: String(r.url || ''),
+    source: sanitizeLine(r.source || 'Unknown'),
+    published_at: String(r.publish_time || r.created_at || ''),
+    description: sanitizeLine(typeof r.summary === 'string' ? r.summary : ''),
+    score: Number(r.impact_score || 0)
+  }));
+}
+
+async function buildStructuredAnswer({ question, plan, docs, brief }) {
+  const briefObj = brief
+    ? {
+        headline: sanitizeLine(brief.headline),
+        one_liner: sanitizeLine(brief.one_liner),
+        top_drivers: Array.isArray(brief.top_drivers) ? brief.top_drivers.slice(0, 3) : [],
+        impacts: brief.impacts || {},
+        actions: Array.isArray(brief.actions) ? brief.actions.slice(0, 3) : []
+      }
+    : null;
+  const citations = docs.map((d) => ({
+    id: String(d.id || ''),
+    title: sanitizeLine(d.title),
+    url: String(d.url || ''),
+    source: sanitizeLine(d.source),
+    published_at: String(d.published_at || '')
+  }));
+  const prompt = `
+你是跨境SaaS管理层顾问。请仅基于提供的数据回答，输出严格 JSON：
+{
+  "title":"不超过24字",
+  "sections":[
+    {"heading":"当前判断","bullets":["..."]},
+    {"heading":"关键依据","bullets":["..."]},
+    {"heading":"下一步动作","bullets":["..."]}
+  ],
+  "citations":[{"id":"","title":"","url":"","source":"","published_at":""}]
+}
+要求：
+- 不得输出 Markdown。
+- 不得出现“信息不足/未找到相关条目/无法评估/新闻不足”。
+- 在可用信号下给出可执行建议。
+- bullets 每项一句话，最多 5 条。
+问题：${question}
+路由计划：${JSON.stringify(plan)}
+daily_brief：${JSON.stringify(briefObj)}
+news_docs：${JSON.stringify(citations.slice(0, 10))}
+`.trim();
+  try {
+    const content = await callLlmOnce({
+      messages: [
+        { role: 'system', content: '你是严格JSON输出器。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.25,
+      maxTokens: 1200
+    });
+    const parsed = safeJsonParse(content, null);
+    if (!parsed || typeof parsed !== 'object') throw new Error('invalid answer json');
+    const title = sanitizeLine(parsed.title || '今日策略答复');
+    const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
+    const sections = sectionsRaw
+      .map((s) => ({
+        heading: sanitizeLine(s?.heading || '要点'),
+        bullets: (Array.isArray(s?.bullets) ? s.bullets : [])
+          .map((b) => sanitizeLine(b))
+          .filter(Boolean)
+          .slice(0, 6)
+      }))
+      .filter((s) => s.heading && s.bullets.length > 0)
+      .slice(0, 4);
+    const normalizedCitations = Array.isArray(parsed.citations) ? parsed.citations : citations;
+    return { title, sections: sections.length ? sections : [{ heading: '当前判断', bullets: ['先执行最小可逆动作，并在24-72小时内验证关键指标。'] }], citations: normalizedCitations.slice(0, 10) };
+  } catch {
+    const fallbackSections = [
+      {
+        heading: '当前判断',
+        bullets: [
+          '外部信号存在波动，建议先聚焦可逆动作而非一次性重投入。'
+        ]
+      },
+      {
+        heading: '关键依据',
+        bullets: docs.slice(0, 3).map((d) => `${sanitizeLine(d.title)}（${sanitizeLine(d.source)}）`)
+      },
+      {
+        heading: '下一步动作',
+        bullets: [
+          '24小时内确认核心指标看板（转化率、支付成功率、退款/拒付率）。',
+          '72小时内完成一次小流量实验，对比动作前后差异并决定扩容或回撤。'
+        ]
+      }
+    ];
+    return { title: '今日策略答复', sections: fallbackSections, citations: citations.slice(0, 10) };
+  }
+}
+
+async function streamPlannedChat(question, res) {
+  const plan = await planQuery(question);
+  let route = plan.route;
+  let docs = [];
+  let brief = null;
+
+  if (route === 'DAILY_BRIEF_QA') {
+    brief = await fetchLatestDailyBrief().catch(() => null);
+    if (!brief) {
+      route = 'TOP_N_FALLBACK';
+    }
+  }
+
+  if (route === 'NEWS_SEARCH') {
+    const dayMap = { '7d': 7, '30d': 30, '180d': 180 };
+    const days = dayMap[plan.time_window] || 30;
+    docs = await searchNewsRaw(question, {
+      supabaseUrl: SUPABASE_URL,
+      supabaseServiceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+      days,
+      limit: Math.min(Math.max(plan.top_n || 8, 3), 12),
+      timeoutMs: 9000
+    });
+    if (!docs.length && Array.isArray(plan.query_expansion) && plan.query_expansion.length) {
+      const merged = [];
+      for (const expanded of plan.query_expansion) {
+        const hit = await searchNewsRaw(expanded, {
+          supabaseUrl: SUPABASE_URL,
+          supabaseServiceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+          days: 30,
+          limit: 6,
+          timeoutMs: 9000
+        });
+        merged.push(...hit);
+      }
+      const uniq = new Map();
+      merged.forEach((d) => uniq.set(String(d.id || `${d.url}`), d));
+      docs = Array.from(uniq.values()).slice(0, 10);
+    }
+    if (!docs.length) {
+      route = 'TOP_N_FALLBACK';
+    }
+  }
+
+  if (route === 'TOP_N_FALLBACK') {
+    docs = await fetchTopNews({ days: 7, limit: Math.min(Math.max(plan.top_n || 8, 3), 12) }).catch(() => []);
+    if (!docs.length) {
+      docs = await fetchTopNews({ days: 30, limit: 8 }).catch(() => []);
+    }
+    if (!brief) {
+      brief = await fetchLatestDailyBrief().catch(() => null);
+    }
+  }
+
+  const allDocContext = docs.slice(0, 10);
+  const answerJson = await buildStructuredAnswer({
+    question,
+    plan: { ...plan, route },
+    docs: allDocContext,
+    brief
+  });
+  const citations =
+    route === 'DAILY_BRIEF_QA'
+      ? normalizeCitationsFromBrief(brief || {}, allDocContext)
+      : (answerJson.citations || allDocContext).slice(0, 10);
+
+  const payload = {
+    title: sanitizeLine(answerJson.title || '今日策略答复'),
+    sections: Array.isArray(answerJson.sections) ? answerJson.sections : [],
+    citations: citations.map((c) => ({
+      id: String(c.id || ''),
+      title: sanitizeLine(c.title || ''),
+      url: String(c.url || ''),
+      source: sanitizeLine(c.source || ''),
+      published_at: String(c.published_at || '')
+    })),
+    route
+  };
+
+  startSse(res);
+  emitSse(res, { sources: payload.citations });
+  emitSse(res, { result: { answer: JSON.stringify(payload), sources: payload.citations } });
+  endSse(res);
+}
+
 async function streamNewsSummary(prompt, res) {
   const upstream = await fetch(API_URL, {
     method: 'POST',
@@ -246,53 +608,6 @@ async function streamNewsSummary(prompt, res) {
   endSse(res);
 }
 
-async function streamDbOnlyChat(question, res) {
-  const docs = await searchNewsRaw(question, {
-    supabaseUrl: SUPABASE_URL,
-    supabaseServiceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
-    days: 30,
-    limit: 8,
-    timeoutMs: 8000
-  });
-
-  const sources = docs.map((doc, idx) => ({
-    doc: idx + 1,
-    id: doc.id,
-    title: doc.title,
-    url: doc.url,
-    published_at: doc.published_at,
-    source: doc.source
-  }));
-
-  startSse(res);
-  emitSse(res, { sources });
-
-  if (docs.length === 0) {
-    const answer = '新闻库中未找到相关条目（最近30/180天），请换关键词或先补充RSS源。';
-    emitSse(res, { token: answer });
-    emitSse(res, { result: { answer, sources: [] } });
-    endSse(res);
-    return;
-  }
-
-  const context = buildContext(docs, 6000);
-  const answer = await generateDbOnlyAnswer({
-    question,
-    context,
-    apiUrl: API_URL,
-    apiKey: API_KEY,
-    model: MODEL,
-    timeoutMs: 45000
-  });
-
-  const tokens = splitIntoStreamTokens(answer, 72);
-  for (const token of tokens) {
-    emitSse(res, { token });
-  }
-  emitSse(res, { result: { answer, sources } });
-  endSse(res);
-}
-
 async function handleAiChat(req, res) {
   if (!API_KEY) {
     sendJson(res, 500, { error: 'LLM_API_KEY missing on server.' });
@@ -319,7 +634,7 @@ async function handleAiChat(req, res) {
     return;
   }
 
-  await streamDbOnlyChat(question, res);
+  await streamPlannedChat(question, res);
 }
 
 async function handleNewsRaw(req, res) {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { streamAiChat, streamNewsSummary } from '../services/ai';
+import { streamAiChat } from '../services/ai';
 import { track } from '../lib/analytics';
 
 const DIMENSION_META = {
@@ -244,6 +244,60 @@ function renderParagraphs(text) {
       {paragraph}
     </p>
   ));
+}
+
+function parseStructuredAssistantPayload(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const title = String(parsed.title || '').trim();
+    const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
+    const sections = sectionsRaw
+      .map((section) => ({
+        heading: String(section?.heading || '').trim(),
+        bullets: (Array.isArray(section?.bullets) ? section.bullets : [])
+          .map((bullet) => String(bullet || '').trim())
+          .filter(Boolean)
+      }))
+      .filter((section) => section.heading && section.bullets.length > 0);
+    const citations = (Array.isArray(parsed.citations) ? parsed.citations : [])
+      .map((item) => ({
+        id: String(item?.id || '').trim(),
+        title: String(item?.title || '').trim(),
+        url: String(item?.url || '').trim(),
+        source: String(item?.source || '').trim(),
+        published_at: String(item?.published_at || '').trim()
+      }))
+      .filter((item) => item.url);
+    if (!title && sections.length === 0) return null;
+    return { title, sections, citations };
+  } catch {
+    return null;
+  }
+}
+
+function renderSections(message) {
+  const sections = Array.isArray(message?.sections) ? message.sections : [];
+  if (!sections.length) return renderParagraphs(message.text || '');
+  return (
+    <div className="space-y-2">
+      {message.title ? <p className="text-sm font-semibold text-cyan-100">{message.title}</p> : null}
+      {sections.map((section, idx) => (
+        <article key={`${section.heading}-${idx}`} className="rounded-lg border border-slate-700/70 bg-slate-950/45 p-2">
+          <p className="text-xs font-semibold text-slate-200">{section.heading}</p>
+          <div className="mt-1 space-y-1">
+            {section.bullets.map((bullet, bIdx) => (
+              <p key={`${idx}-${bIdx}`} className="text-sm text-slate-100 leading-[1.6]">
+                {bIdx + 1}. {bullet}
+              </p>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 async function fetchLatestDailyBrief() {
@@ -506,7 +560,9 @@ function AssistantBubble({ message, onOpenEvidence }) {
         </div>
 
         <div className="space-y-2.5 text-sm leading-[1.62] text-slate-100">
-          {renderParagraphs(message.text || (message.pending ? '正在基于当前评分与暴露矩阵生成策略回答...' : ''))}
+          {message.pending && !message.text
+            ? renderParagraphs('正在基于当前评分与暴露矩阵生成策略回答...')
+            : renderSections(message)}
         </div>
 
         {Array.isArray(message.sources) && message.sources.length > 0 ? (
@@ -617,7 +673,6 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
     const question = String(rawQuestion || '').trim();
     const isSample = Boolean(options.isSample);
     const sampleId = String(options.sampleId || '').trim();
-    const isSummaryQuestion = !isSample && isNewsSummaryQuestion(question);
     if (!question) return;
 
     if (isSample && sampleId) {
@@ -636,6 +691,8 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
         id: assistantId,
         role: 'assistant',
         text: '',
+        title: '',
+        sections: [],
         sources: [],
         structure,
         pending: true,
@@ -645,29 +702,21 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
     setInput('');
 
     try {
-      if (isSample) {
-        const rawBrief = latestBrief || (await fetchLatestDailyBrief());
-        if (rawBrief && !latestBrief) {
-          setLatestBrief(rawBrief);
-        }
-        const brief = normalizeDailyBrief(rawBrief);
-        const answer = buildSampleQuestionAnswer(question, brief, news);
-        setMessages((prev) =>
-          prev.map((item) => (item.id === assistantId ? { ...item, text: answer.text, sources: answer.sources, pending: false } : item))
-        );
-      } else if (isSummaryQuestion) {
-        const newsItems = pickRecentNewsItems(news, 7, 12);
-        if (newsItems.length === 0) {
-          throw new Error('no_recent_news');
-        }
-        let summaryRawBuffer = '';
-        await streamNewsSummary(newsItems, {
+      const fullAnswer = await streamAiChat(
+        {
+          userQuestion: question,
+          baseline: scoreBreakdown?.baseline?.overall || 0,
+          delta: scoreBreakdown?.delta?.overall || 0,
+          finalScore: scoreBreakdown?.final?.overall || 0,
+          exposureMatrix,
+          priorityRanking
+        },
+        {
           onToken: (token) => {
-            summaryRawBuffer += token;
             setMessages((prev) =>
               prev.map((item) =>
                 item.id === assistantId
-                  ? { ...item, text: sanitizePlainText(summaryRawBuffer) }
+                  ? { ...item, text: `${item.text}${token}` }
                   : item
               )
             );
@@ -675,81 +724,67 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
           onSources: (sources) => {
             setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, sources } : item)));
           }
-        });
+        }
+      );
 
-        setMessages((prev) =>
-          prev.map((item) =>
-            item.id === assistantId
-              ? {
-                  ...item,
-                  text: formatExecutiveSummaryText(summaryRawBuffer),
-                  pending: false
-                }
-              : item
-          )
-        );
-      } else {
-        await streamAiChat(
-          {
-            userQuestion: question,
-            baseline: scoreBreakdown?.baseline?.overall || 0,
-            delta: scoreBreakdown?.delta?.overall || 0,
-            finalScore: scoreBreakdown?.final?.overall || 0,
-            exposureMatrix,
-            priorityRanking
-          },
-          {
-            onToken: (token) => {
-            setMessages((prev) =>
-              prev.map((item) =>
-                  item.id === assistantId
-                    ? { ...item, text: formatStructuredSections(sanitizePlainText(`${item.text}${token}`)) }
-                    : item
-              )
-            );
-            },
-            onSources: (sources) => {
-              setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, sources } : item)));
-            }
-          }
-        );
-
-        setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, pending: false } : item)));
-      }
+      const structured = parseStructuredAssistantPayload(fullAnswer);
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === assistantId
+            ? {
+                ...item,
+                text: structured ? '' : formatStructuredSections(sanitizePlainText(fullAnswer)),
+                title: structured?.title || '',
+                sections: structured?.sections || [],
+                sources: structured?.citations?.length ? structured.citations : item.sources,
+                pending: false
+              }
+            : item
+        )
+      );
     } catch (error) {
-      const noRecentNews = String(error?.message || '').includes('no_recent_news');
-      const fallback = noRecentNews
-        ? '近7天（UTC+8）暂无可用于总结的新闻标题，请稍后再试或先检查新闻抓取状态。'
-        : isSample
-          ? buildSampleQuestionAnswer(
-              question,
-              normalizeDailyBrief(latestBrief) || {
-                headline: '外部信号分散，先执行最小可逆动作',
-                oneLiner: '当前优先稳住支付与转化基本盘，再依据内部指标扩大动作。',
-                topDrivers: [],
-                impacts: {},
-                actions: [],
-                citations: [],
-                stats: {}
-              },
-              news
-            )
-          : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
+      const fallback = isSample
+        ? buildSampleQuestionAnswer(
+            question,
+            normalizeDailyBrief(latestBrief) || {
+              headline: '外部信号分散，先执行最小可逆动作',
+              oneLiner: '当前优先稳住支付与转化基本盘，再依据内部指标扩大动作。',
+              topDrivers: [],
+              impacts: {},
+              actions: [],
+              citations: [],
+              stats: {}
+            },
+            news
+          )
+        : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
       const fallbackText = typeof fallback === 'string' ? fallback : fallback.text;
       const fallbackSources = typeof fallback === 'string' ? [] : fallback.sources;
+      const fallbackStructured = {
+        title: '策略兜底建议',
+        sections: [
+          {
+            heading: '当前判断',
+            bullets: ['当前已用信号可支持先执行最小可逆动作，并同步验证关键指标。']
+          },
+          {
+            heading: '下一步动作',
+            bullets: ['优先关注转化率、支付成功率与退款/拒付率，48小时内回看。']
+          }
+        ]
+      };
 
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantId
             ? {
                 ...item,
-                text:
-                  isSummaryQuestion
-                    ? formatExecutiveSummaryText(item.text || fallbackText)
-                    : formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
+                text: formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
+                title: fallbackStructured.title,
+                sections: fallbackStructured.sections,
                 sources: item.sources && item.sources.length > 0 ? item.sources : fallbackSources,
                 pending: false,
-                error: noRecentNews && !isSample ? '' : isSample ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
+                error: isSample ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
               }
             : item
         )
