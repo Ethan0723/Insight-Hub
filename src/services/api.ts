@@ -532,8 +532,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
     'select',
     'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
-  url.searchParams.append('order', 'publish_time.desc.nullslast');
-  url.searchParams.append('order', 'created_at.desc');
+  url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   url.searchParams.set('limit', String(SUPABASE_LIMIT));
 
   const res = await fetch(url.toString(), {

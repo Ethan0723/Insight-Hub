@@ -337,8 +337,7 @@ async function handleNewsRaw(req, res) {
     'select',
     'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
-  upstreamUrl.searchParams.append('order', 'publish_time.desc.nullslast');
-  upstreamUrl.searchParams.append('order', 'created_at.desc');
+  upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   upstreamUrl.searchParams.set('limit', String(limit));
 
   const upstream = await fetch(upstreamUrl.toString(), {
