@@ -206,6 +206,26 @@ function safeJsonParse(text, fallback = null) {
   }
 }
 
+function tryExtractJsonObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    const parsedFenced = safeJsonParse(fenced[1], null);
+    if (parsedFenced && typeof parsedFenced === 'object') return parsedFenced;
+  }
+  const direct = safeJsonParse(raw, null);
+  if (direct && typeof direct === 'object') return direct;
+  const first = raw.indexOf('{');
+  const last = raw.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    const sliced = raw.slice(first, last + 1);
+    const parsedSliced = safeJsonParse(sliced, null);
+    if (parsedSliced && typeof parsedSliced === 'object') return parsedSliced;
+  }
+  return null;
+}
+
 function sanitizeLine(text) {
   return String(text || '')
     .replace(/\r/g, '')
@@ -289,7 +309,7 @@ async function planQuery(question) {
       temperature: 0.1,
       maxTokens: 320
     });
-    const parsed = safeJsonParse(content, null);
+    const parsed = tryExtractJsonObject(content);
     if (!parsed || typeof parsed !== 'object') throw new Error('invalid planner json');
     const route = ['DAILY_BRIEF_QA', 'NEWS_SEARCH', 'TOP_N_FALLBACK'].includes(String(parsed.route))
       ? String(parsed.route)
@@ -435,7 +455,7 @@ news_docs：${JSON.stringify(citations.slice(0, 10))}
       temperature: 0.25,
       maxTokens: 1200
     });
-    const parsed = safeJsonParse(content, null);
+    const parsed = tryExtractJsonObject(content);
     if (!parsed || typeof parsed !== 'object') throw new Error('invalid answer json');
     const title = sanitizeLine(parsed.title || '今日策略答复');
     const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
@@ -452,26 +472,52 @@ news_docs：${JSON.stringify(citations.slice(0, 10))}
     const normalizedCitations = Array.isArray(parsed.citations) ? parsed.citations : citations;
     return { title, sections: sections.length ? sections : [{ heading: '当前判断', bullets: ['先执行最小可逆动作，并在24-72小时内验证关键指标。'] }], citations: normalizedCitations.slice(0, 10) };
   } catch {
+    const q = sanitizeLine(question).toLowerCase();
+    const isSummary = /(总结|汇总|概览|overview|今日关注|今天关注|重点)/i.test(q);
+    const isRisk = /(风险|质疑|假设|挑战|担忧|低估)/i.test(q);
+    const isAction = /(行动|保留一个|先做|优先|下一步)/i.test(q);
+    const routeLabel =
+      plan?.route === 'DAILY_BRIEF_QA'
+        ? '战略复盘'
+        : plan?.route === 'NEWS_SEARCH'
+        ? '主题研判'
+        : '全局扫描';
+    const title = isSummary ? '今日重点扫描' : isRisk ? '风险优先解读' : isAction ? '行动优先解读' : `${routeLabel}答复`;
+
+    const judgement =
+      isSummary
+        ? '当前外部信号并非单一主线，建议以高影响事件为牵引，先做可逆决策。'
+        : isRisk
+        ? '当前最需要防范的是“高影响信号向经营指标传导”的时滞风险，而非单点波动本身。'
+        : isAction
+        ? '建议先保留低成本且可快速验证的动作，避免一次性资源押注。'
+        : '在当前可用信号下，建议以验证闭环优先于规模投入。';
+
     const fallbackSections = [
       {
         heading: '当前判断',
-        bullets: [
-          '外部信号存在波动，建议先聚焦可逆动作而非一次性重投入。'
-        ]
+        bullets: [judgement]
       },
       {
         heading: '关键依据',
-        bullets: docs.slice(0, 3).map((d) => `${sanitizeLine(d.title)}（${sanitizeLine(d.source)}）`)
+        bullets: (docs.slice(0, 3).map((d) => `${sanitizeLine(d.title)}（${sanitizeLine(d.source)}）`)).length
+          ? docs.slice(0, 3).map((d) => `${sanitizeLine(d.title)}（${sanitizeLine(d.source)}）`)
+          : ['近7天高影响新闻主线分散，暂按“先验证再扩量”执行。']
       },
       {
         heading: '下一步动作',
-        bullets: [
-          '24小时内确认核心指标看板（转化率、支付成功率、退款/拒付率）。',
-          '72小时内完成一次小流量实验，对比动作前后差异并决定扩容或回撤。'
-        ]
+        bullets: isAction
+          ? [
+              '24小时内仅保留一个最小动作并明确负责人，避免多线程分散执行力。',
+              '72小时内用转化率、支付成功率、退款/拒付率三项指标决定扩容或回撤。'
+            ]
+          : [
+              '24小时内确认核心指标看板（转化率、支付成功率、退款/拒付率）。',
+              '72小时内完成一次小流量实验，对比动作前后差异并决定扩容或回撤。'
+            ]
       }
     ];
-    return { title: '今日策略答复', sections: fallbackSections, citations: citations.slice(0, 10) };
+    return { title, sections: fallbackSections, citations: citations.slice(0, 10) };
   }
 }
 
