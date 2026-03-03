@@ -328,13 +328,18 @@ async function handleNewsRaw(req, res) {
     return;
   }
 
+  const requestUrl = new URL(req.url || '/api/news_raw', `http://${req.headers.host || 'localhost'}`);
+  const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200;
+
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   upstreamUrl.searchParams.set(
     'select',
     'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
-  upstreamUrl.searchParams.set('order', 'publish_time.desc');
-  upstreamUrl.searchParams.set('limit', '1000');
+  upstreamUrl.searchParams.append('order', 'publish_time.desc.nullslast');
+  upstreamUrl.searchParams.append('order', 'created_at.desc');
+  upstreamUrl.searchParams.set('limit', String(limit));
 
   const upstream = await fetch(upstreamUrl.toString(), {
     headers: {

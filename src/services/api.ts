@@ -21,7 +21,7 @@ const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
-const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
+const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 200);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 
@@ -532,7 +532,8 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
     'select',
     'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
-  url.searchParams.set('order', 'publish_time.desc');
+  url.searchParams.append('order', 'publish_time.desc.nullslast');
+  url.searchParams.append('order', 'created_at.desc');
   url.searchParams.set('limit', String(SUPABASE_LIMIT));
 
   const res = await fetch(url.toString(), {
