@@ -25,6 +25,50 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
+export interface AIChatV2Payload {
+  query: string;
+  mode?: 'auto' | 'news_summary' | 'brief_today' | 'qa';
+  range_days?: number;
+  top_k?: number;
+  timezone?: string;
+  debug?: boolean;
+}
+
+export interface AIChatV2Response {
+  answer: string;
+  cards: {
+    headline: string;
+    key_drivers: string[];
+    impacts: string[];
+    actions: Array<{
+      priority: 'P0' | 'P1' | 'P2' | string;
+      title: string;
+      why: string;
+      owner_suggest: string;
+      timeframe: string;
+    }>;
+  };
+  sources: Array<{
+    news_id: string;
+    title: string;
+    url: string;
+    domain: string;
+    published_at: string;
+    score: number;
+  }>;
+  reasoning_view: {
+    intent: string;
+    time_range: string;
+    retrieval: {
+      total_candidates: number;
+      returned: number;
+      strategy: string;
+    };
+    synthesis_steps: string[];
+    clusters?: string[];
+  };
+}
+
 function buildAiApiUrl(path: string): string {
   const base = (import.meta.env.VITE_AI_API_BASE as string | undefined)?.trim();
   if (!base) return path;
@@ -134,4 +178,20 @@ export async function streamNewsSummary(
   }
 
   return streamSseResponse(response, options.onToken, options.onSources);
+}
+
+export async function askAiChatV2(payload: AIChatV2Payload): Promise<AIChatV2Response> {
+  const response = await fetch(buildAiApiUrl('/api/ai_chat_v2'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(text || `AI chat v2 failed: ${response.status}`);
+  }
+
+  const parsed = JSON.parse(text) as AIChatV2Response;
+  return parsed;
 }

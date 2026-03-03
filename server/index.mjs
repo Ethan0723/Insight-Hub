@@ -242,6 +242,35 @@ function extractDomain(url) {
   }
 }
 
+function clamp(num, min, max) {
+  return Math.min(Math.max(Number(num) || 0, min), max);
+}
+
+function dedupeByUrl(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const url = String(row?.url || '').trim();
+    const key = url || `id:${String(row?.id || '')}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, row);
+      return;
+    }
+    const prevTs = Date.parse(prev.published_at || prev.created_at || '') || 0;
+    const curTs = Date.parse(row.published_at || row.created_at || '') || 0;
+    if (curTs > prevTs) map.set(key, row);
+  });
+  return Array.from(map.values());
+}
+
+function detectIntentByRule(query) {
+  const q = String(query || '').toLowerCase();
+  if (/近3天|最近3天|过去3天|三天|总结|汇总|扫描|盘点/.test(q)) return 'news_summary';
+  if (/近7天|最近7天|过去7天|一周|7天/.test(q)) return 'news_summary';
+  if (/今天|今日/.test(q)) return 'brief_today';
+  return 'qa';
+}
+
 async function callLlmOnce({ messages, temperature = 0.2, maxTokens = 1200 }) {
   const upstream = await fetch(API_URL, {
     method: 'POST',
@@ -406,6 +435,337 @@ async function fetchTopNews({ days = 7, limit = 8 }) {
     description: sanitizeLine(typeof r.summary === 'string' ? r.summary : ''),
     score: Number(r.impact_score || 0)
   }));
+}
+
+async function detectIntentByLlm(query, mode = 'auto') {
+  if (mode && mode !== 'auto') return mode;
+  const prompt = `
+你是意图分类器。只输出严格 JSON：{"intent":"news_summary|brief_today|qa"}。
+规则：
+- 包含“近3天/最近7天/总结/盘点/扫描新闻” => news_summary
+- 包含“今天/今日” => brief_today
+- 其它 => qa
+用户问题：${query}
+`.trim();
+  try {
+    const content = await callLlmOnce({
+      messages: [
+        { role: 'system', content: '你是严格JSON输出器。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.0,
+      maxTokens: 120
+    });
+    const parsed = tryExtractJsonObject(content);
+    const intent = String(parsed?.intent || '').trim();
+    return ['news_summary', 'brief_today', 'qa'].includes(intent) ? intent : detectIntentByRule(query);
+  } catch {
+    return detectIntentByRule(query);
+  }
+}
+
+async function buildQueryExpansion(query, intent) {
+  const prompt = `
+你是检索扩展器。只输出严格 JSON：
+{"topic_tags":[""],"query_expansion":[""],"clusters":[""]}。
+要求：topic_tags 最多8个，query_expansion 最多6个，clusters 最多4个；只输出短词组。
+意图：${intent}
+问题：${query}
+`.trim();
+  try {
+    const content = await callLlmOnce({
+      messages: [
+        { role: 'system', content: '你是严格JSON输出器。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,
+      maxTokens: 260
+    });
+    const parsed = tryExtractJsonObject(content) || {};
+    const topic_tags = Array.isArray(parsed.topic_tags) ? parsed.topic_tags.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 8) : [];
+    const query_expansion = Array.isArray(parsed.query_expansion)
+      ? parsed.query_expansion.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 6)
+      : [];
+    const clusters = Array.isArray(parsed.clusters) ? parsed.clusters.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 4) : [];
+    return { topic_tags, query_expansion, clusters };
+  } catch {
+    return { topic_tags: [], query_expansion: [], clusters: [] };
+  }
+}
+
+async function fetchNewsCandidatesV2({ days = 7, limit = 200 }) {
+  const cutoff = new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000).toISOString();
+  const queryWithEmbedding = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
+  queryWithEmbedding.searchParams.set(
+    'select',
+    'id,title,url,source,publish_time,created_at,summary,content,impact_score,risk_level,embedding'
+  );
+  queryWithEmbedding.searchParams.set('or', `(publish_time.gte.${cutoff},created_at.gte.${cutoff})`);
+  queryWithEmbedding.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
+  queryWithEmbedding.searchParams.set('limit', String(clamp(limit, 30, 500)));
+
+  const requestHeaders = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+  };
+
+  let text = '';
+  let res = await fetch(queryWithEmbedding.toString(), { headers: requestHeaders });
+  text = await res.text();
+  if (!res.ok) {
+    const fallbackUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
+    fallbackUrl.searchParams.set(
+      'select',
+      'id,title,url,source,publish_time,created_at,summary,content,impact_score,risk_level'
+    );
+    fallbackUrl.searchParams.set('or', `(publish_time.gte.${cutoff},created_at.gte.${cutoff})`);
+    fallbackUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
+    fallbackUrl.searchParams.set('limit', String(clamp(limit, 30, 500)));
+    res = await fetch(fallbackUrl.toString(), { headers: requestHeaders });
+    text = await res.text();
+  }
+  if (!res.ok) throw new Error(`news candidate query failed ${res.status}: ${text.slice(0, 180)}`);
+  const rows = safeJsonParse(text, []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function rankNewsHybrid({ query, candidates, expansion }) {
+  const now = Date.now();
+  const terms = [
+    sanitizeLine(query).toLowerCase(),
+    ...(Array.isArray(expansion?.topic_tags) ? expansion.topic_tags : []).map((v) => sanitizeLine(v).toLowerCase()),
+    ...(Array.isArray(expansion?.query_expansion) ? expansion.query_expansion : []).map((v) => sanitizeLine(v).toLowerCase())
+  ].filter(Boolean);
+
+  const scored = candidates.map((row) => {
+    const title = String(row?.title || '');
+    const summary = typeof row?.summary === 'string' ? row.summary : JSON.stringify(row?.summary || '');
+    const content = String(row?.content || '');
+    const text = `${title}\n${summary}\n${content}`.toLowerCase();
+
+    let keywordScore = 0;
+    terms.forEach((term) => {
+      if (!term) return;
+      if (text.includes(term)) keywordScore += 1.2;
+      term.split(/\s+/).forEach((token) => {
+        if (token && token.length >= 2 && text.includes(token)) keywordScore += 0.35;
+      });
+    });
+
+    const impact = Number(row?.impact_score || 0);
+    const riskRaw = String(row?.risk_level || '').toLowerCase();
+    const riskScore = /high|高/.test(riskRaw) ? 1.2 : /mid|中/.test(riskRaw) ? 0.7 : 0.2;
+    const ts = Date.parse(row?.publish_time || row?.created_at || '') || now;
+    const daysAgo = Math.max(0, (now - ts) / (1000 * 60 * 60 * 24));
+    const timeDecay = Math.max(0.2, 1 - daysAgo / 14);
+    const semanticProxy = keywordScore > 0 ? Math.min(2.2, keywordScore * 0.6) : 0;
+    const total = keywordScore * 1.8 + semanticProxy + timeDecay + impact * 0.02 + riskScore;
+
+    return {
+      news_id: String(row?.id || ''),
+      title: sanitizeLine(title) || 'Untitled',
+      url: String(row?.url || ''),
+      domain: extractDomain(row?.url) || sanitizeLine(row?.source) || 'unknown',
+      published_at: String(row?.publish_time || row?.created_at || ''),
+      source: sanitizeLine(row?.source || ''),
+      summary: sanitizeLine(typeof row?.summary === 'string' ? row.summary : ''),
+      content: sanitizeLine(content).slice(0, 500),
+      score: Number(total.toFixed(3))
+    };
+  });
+
+  return dedupeByUrl(scored)
+    .sort((a, b) => b.score - a.score || (Date.parse(b.published_at) || 0) - (Date.parse(a.published_at) || 0));
+}
+
+function buildContextFromSources(sources, maxN = 12) {
+  return (Array.isArray(sources) ? sources : []).slice(0, maxN).map((item, idx) => ({
+    news_id: item.news_id,
+    title: item.title,
+    url: item.url,
+    domain: item.domain || extractDomain(item.url),
+    published_at: item.published_at,
+    summary: item.summary || item.content || '',
+    score: item.score
+  }));
+}
+
+async function generateAssistantAnswer({ query, intent, contextSources, briefContext, retrieval, timeRangeText }) {
+  const prompt = `
+你是战略分析师。请仅基于提供的数据库新闻内容生成回答。
+所有结论必须来自 context。
+不要编造信息。
+若 context 不足，请说明信息不足。
+
+请输出严格 JSON：
+{
+  "answer":"...",
+  "cards":{
+    "headline":"...",
+    "key_drivers":["..."],
+    "impacts":["..."],
+    "actions":[{"priority":"P0","title":"...","why":"...","owner_suggest":"...","timeframe":"7d"}]
+  }
+}
+要求：
+- answer 用中文，聚焦管理层决策，可执行。
+- actions 1-3条，优先级用 P0/P1/P2。
+- 不要 Markdown。
+
+用户问题：${query}
+意图：${intent}
+时间窗口：${timeRangeText}
+检索统计：${JSON.stringify(retrieval)}
+daily_brief 上下文：${JSON.stringify(briefContext || {})}
+context 新闻：${JSON.stringify(contextSources)}
+`.trim();
+
+  const content = await callLlmOnce({
+    messages: [
+      { role: 'system', content: '你是严格JSON输出器。' },
+      { role: 'user', content: prompt }
+    ],
+    temperature: 0.25,
+    maxTokens: 1500
+  });
+  const parsed = tryExtractJsonObject(content);
+  if (!parsed || typeof parsed !== 'object') throw new Error('invalid ai_chat_v2 json');
+
+  const cards = parsed.cards && typeof parsed.cards === 'object' ? parsed.cards : {};
+  return {
+    answer: sanitizeLine(parsed.answer || ''),
+    cards: {
+      headline: sanitizeLine(cards.headline || ''),
+      key_drivers: Array.isArray(cards.key_drivers) ? cards.key_drivers.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 5) : [],
+      impacts: Array.isArray(cards.impacts) ? cards.impacts.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 5) : [],
+      actions: Array.isArray(cards.actions)
+        ? cards.actions.map((a) => ({
+            priority: ['P0', 'P1', 'P2'].includes(String(a?.priority || '').toUpperCase())
+              ? String(a.priority).toUpperCase()
+              : 'P1',
+            title: sanitizeLine(a?.title || ''),
+            why: sanitizeLine(a?.why || ''),
+            owner_suggest: sanitizeLine(a?.owner_suggest || '待定'),
+            timeframe: sanitizeLine(a?.timeframe || '7d')
+          })).filter((a) => a.title).slice(0, 3)
+        : []
+    }
+  };
+}
+
+async function handleAiChatV2(req, res) {
+  if (!API_KEY) return sendJson(res, 500, { error: 'LLM_API_KEY missing on server.' });
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return sendJson(res, 500, { error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on server.' });
+  }
+
+  const body = await readJsonBody(req);
+  const query = sanitizeLine(body?.query || '');
+  if (!query) return sendJson(res, 400, { error: 'query is required' });
+
+  const mode = ['auto', 'news_summary', 'brief_today', 'qa'].includes(String(body?.mode || 'auto'))
+    ? String(body.mode || 'auto')
+    : 'auto';
+  const topK = clamp(body?.top_k, 3, 20) || 12;
+  const requestedDays = clamp(body?.range_days, 1, 180) || (mode === 'news_summary' ? 7 : 3);
+  const timezone = sanitizeLine(body?.timezone || '+08:00') || '+08:00';
+
+  const intent = await detectIntentByLlm(query, mode);
+  const expansion = await buildQueryExpansion(query, intent);
+  const dailyBrief = await fetchLatestDailyBrief().catch(() => null);
+  const candidates = await fetchNewsCandidatesV2({ days: requestedDays, limit: 260 }).catch(() => []);
+  const ranked = rankNewsHybrid({ query, candidates, expansion });
+  const sources = buildContextFromSources(ranked.slice(0, topK), topK);
+
+  const retrieval = {
+    total_candidates: candidates.length,
+    returned: sources.length,
+    strategy: candidates.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'embedding'))
+      ? 'hybrid(keyword+semantic+time_decay+dedupe)'
+      : 'hybrid(keyword+query_expansion+time_decay+dedupe)'
+  };
+  const timeRangeText = `${requestedDays}d (${timezone})`;
+
+  const briefContext = dailyBrief
+    ? {
+        brief_date: dailyBrief.brief_date,
+        headline: sanitizeLine(dailyBrief.headline || ''),
+        one_liner: sanitizeLine(dailyBrief.one_liner || ''),
+        top_drivers: Array.isArray(dailyBrief.top_drivers) ? dailyBrief.top_drivers.slice(0, 3) : []
+      }
+    : null;
+
+  let generated;
+  if (sources.length === 0) {
+    const missPrompt = `
+你是战略分析师。数据库检索结果为空。
+请输出严格 JSON：
+{
+  "answer":"需明确说明未检索到符合条件的新闻，并给出扩大时间窗口建议",
+  "cards":{
+    "headline":"...",
+    "key_drivers":["..."],
+    "impacts":["..."],
+    "actions":[{"priority":"P1","title":"...","why":"...","owner_suggest":"...","timeframe":"7d"}]
+  }
+}
+用户问题：${query}
+当前时间窗口：${requestedDays}天
+`.trim();
+    const missRaw = await callLlmOnce({
+      messages: [{ role: 'system', content: '你是严格JSON输出器。' }, { role: 'user', content: missPrompt }],
+      temperature: 0.2,
+      maxTokens: 800
+    });
+    const missParsed = tryExtractJsonObject(missRaw);
+    generated = {
+      answer: sanitizeLine(missParsed?.answer || '未检索到符合条件的新闻，建议扩大时间窗口到近7天或近30天后重试。'),
+      cards: {
+        headline: sanitizeLine(missParsed?.cards?.headline || '未命中可用新闻'),
+        key_drivers: Array.isArray(missParsed?.cards?.key_drivers) ? missParsed.cards.key_drivers.map((v) => sanitizeLine(v)).filter(Boolean) : [],
+        impacts: Array.isArray(missParsed?.cards?.impacts) ? missParsed.cards.impacts.map((v) => sanitizeLine(v)).filter(Boolean) : [],
+        actions: Array.isArray(missParsed?.cards?.actions)
+          ? missParsed.cards.actions.map((a) => ({
+              priority: ['P0', 'P1', 'P2'].includes(String(a?.priority || '').toUpperCase()) ? String(a.priority).toUpperCase() : 'P1',
+              title: sanitizeLine(a?.title || ''),
+              why: sanitizeLine(a?.why || ''),
+              owner_suggest: sanitizeLine(a?.owner_suggest || '待定'),
+              timeframe: sanitizeLine(a?.timeframe || '7d')
+            })).filter((a) => a.title)
+          : []
+      }
+    };
+  } else {
+    generated = await generateAssistantAnswer({
+      query,
+      intent,
+      contextSources: sources,
+      briefContext,
+      retrieval,
+      timeRangeText
+    });
+  }
+
+  const response = {
+    answer: generated.answer,
+    cards: generated.cards,
+    sources: sources.map((s) => ({
+      news_id: s.news_id,
+      title: s.title,
+      url: s.url,
+      domain: s.domain,
+      published_at: s.published_at,
+      score: s.score
+    })),
+    reasoning_view: {
+      intent,
+      time_range: timeRangeText,
+      retrieval,
+      synthesis_steps: ['识别问题类型', '检索时间窗口内容', '主题聚类', '生成决策结构'],
+      clusters: expansion.clusters
+    }
+  };
+  sendJson(res, 200, response);
 }
 
 async function buildStructuredAnswer({ question, plan, docs, brief }) {
@@ -781,6 +1141,11 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname === '/api/ai_chat') {
       await handleAiChat(req, res);
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/ai_chat_v2') {
+      await handleAiChatV2(req, res);
       return;
     }
 

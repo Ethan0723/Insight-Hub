@@ -1,34 +1,16 @@
-import { useMemo, useState } from 'react';
-import { streamAiChat } from '../services/ai';
+import { useState } from 'react';
+import { askAiChatV2 } from '../services/ai';
 import { track } from '../lib/analytics';
 
-const DIMENSION_META = {
-  subscription: { label: '订阅价格', short: '模板订阅' },
-  commission: { label: '佣金结构', short: '商家运营服务' },
-  payment: { label: '支付链路', short: '支付与收单' },
-  ecosystem: { label: '生态扩展', short: '生态协同' }
-};
-
 const FIXED_SAMPLE_QUESTIONS = [
+  { id: 'q0', text: '帮我总结近3天新闻' },
+  { id: 'q00', text: '总结最近7天新闻' },
+  { id: 'q000', text: '今天有什么需要关注' },
+  { id: 'q0000', text: '今日重点扫描' },
   { id: 'q1', text: '当前结论中，最值得质疑的假设是什么？' },
   { id: 'q2', text: '如果只能保留一个行动，应该保留哪一个？为什么？' },
   { id: 'q3', text: '在当前判断下，最容易被低估的风险是什么？' }
 ];
-
-function parseMaybeJson(value, fallback) {
-  if (value == null) return fallback;
-  if (Array.isArray(fallback) && Array.isArray(value)) return value;
-  if (!Array.isArray(fallback) && typeof fallback === 'object' && typeof value === 'object' && !Array.isArray(value)) {
-    return value;
-  }
-  if (typeof value !== 'string') return fallback;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function sanitizePlainText(text) {
   return String(text || '')
@@ -49,186 +31,6 @@ function sanitizePlainText(text) {
     .trim();
 }
 
-function escapeRegExp(text) {
-  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function formatStructuredSections(text) {
-  let normalized = String(text || '');
-  normalized = normalized
-    .replace(/跨境\s*SaaS\s*\n+\s*战略摘要/g, '跨境 SaaS 战略摘要')
-    .replace(/跨境SaaS\s*\n+\s*战略摘要/g, '跨境 SaaS 战略摘要');
-
-  const labels = ['外部风险信号：', '收入结构影响：', '优先方向：', '结论：', '依据：', '建议：'];
-  labels.forEach((label) => {
-    const pattern = new RegExp(`\\s*${escapeRegExp(label)}\\s*`, 'g');
-    normalized = normalized.replace(pattern, `\n\n${label} `);
-  });
-  normalized = normalized.replace(/\s+([1-9]\.)\s+/g, '\n$1 ');
-  normalized = normalized.replace(/\n{3,}/g, '\n\n');
-  return normalized.trim();
-}
-
-function toNumberedItems(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return [];
-
-  const normalizeChunks = (chunks) => {
-    const refined = [];
-    chunks.forEach((chunk) => {
-      const parts = String(chunk || '')
-        .split(/[，,]/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-      if (parts.length === 0) return;
-      if (parts.length === 1) {
-        refined.push(parts[0]);
-        return;
-      }
-      parts.forEach((part) => {
-        if (refined.length > 0 && part.length < 8) {
-          refined[refined.length - 1] = `${refined[refined.length - 1]}，${part}`;
-        } else {
-          refined.push(part);
-        }
-      });
-    });
-    return refined.filter(Boolean);
-  };
-
-  const numbered = raw
-    .replace(/\r/g, '')
-    .replace(/\n+/g, ' ')
-    .replace(/\s*([1-9]\.)\s*/g, '\n$1 ')
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => item.replace(/^[1-9]\.\s*/, '').trim())
-    .filter(Boolean);
-
-  if (numbered.length > 0) {
-    const expanded = normalizeChunks(
-      numbered.flatMap((item) =>
-        item
-          .split(/[；;。]/)
-          .map((part) => part.trim())
-          .filter(Boolean)
-      )
-    );
-    return (expanded.length > 0 ? expanded : numbered).slice(0, 6);
-  }
-
-  const expanded = normalizeChunks(
-    raw
-      .split(/[。；;]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  );
-  return expanded.slice(0, 6);
-}
-
-function mergeRiskItems(items) {
-  const list = Array.isArray(items) ? items.filter(Boolean) : [];
-  const merged = [];
-  const shouldMergeWithPrev = (current) => {
-    const t = String(current || '').trim();
-    if (!t) return false;
-    if (t.length <= 10) return true;
-    return /^(政策|风险|合规|品牌|不确定性|达峰|激增|上升)/.test(t);
-  };
-
-  for (const raw of list) {
-    const item = String(raw || '').trim();
-    if (!item) continue;
-    if (merged.length === 0) {
-      merged.push(item);
-      continue;
-    }
-    if (shouldMergeWithPrev(item)) {
-      merged[merged.length - 1] = `${merged[merged.length - 1]}，${item}`;
-    } else {
-      merged.push(item);
-    }
-  }
-
-  return merged.slice(0, 5);
-}
-
-function formatExecutiveSummaryText(text) {
-  const normalized = formatStructuredSections(sanitizePlainText(text));
-  const matchSection = (name, endNames) => {
-    const endPattern = endNames.length ? `(?:${endNames.map((n) => escapeRegExp(n)).join('|')})` : '$';
-    const reg = new RegExp(`${escapeRegExp(name)}\\s*([\\s\\S]*?)${endPattern}`, 'i');
-    const m = normalized.match(reg);
-    return m ? m[1].trim() : '';
-  };
-
-  const risk = matchSection('外部风险信号：', ['收入结构影响：', '优先方向：']);
-  const revenue = matchSection('收入结构影响：', ['优先方向：']);
-  const priority = matchSection('优先方向：', []);
-
-  const riskItems = mergeRiskItems(toNumberedItems(risk));
-  const revenueItems = toNumberedItems(revenue);
-  const priorityItems = toNumberedItems(priority);
-  const hasAnyStructuredSection = Boolean(risk || revenue || priority);
-
-  if (!hasAnyStructuredSection) {
-    const lines = normalized
-      .split(/[。；;\n]+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const a = lines.slice(0, 3);
-    const b = lines.slice(3, 6);
-    const c = lines.slice(6, 10);
-    return [
-      '跨境 SaaS 战略摘要',
-      '',
-      '外部风险信号：',
-      ...(a.length ? a : ['暂无可提炼信号']).map((item, idx) => `${idx + 1}. ${item}`),
-      '',
-      '收入结构影响：',
-      ...(b.length ? b : ['暂无明确结构性变化']).map((item, idx) => `${idx + 1}. ${item}`),
-      '',
-      '优先方向：',
-      ...(c.length ? c : ['先执行最小可逆动作并跟踪核心指标']).map((item, idx) => `${idx + 1}. ${item}`)
-    ].join('\n');
-  }
-
-  const blocks = [];
-  blocks.push('跨境 SaaS 战略摘要');
-  blocks.push('');
-  blocks.push('外部风险信号：');
-  (riskItems.length ? riskItems : ['暂无可提炼信号']).forEach((item, idx) => {
-    blocks.push(`${idx + 1}. ${item}`);
-  });
-  blocks.push('');
-  blocks.push('收入结构影响：');
-  (revenueItems.length ? revenueItems : ['暂无明确结构性变化']).forEach((item, idx) => {
-    blocks.push(`${idx + 1}. ${item}`);
-  });
-  blocks.push('');
-  blocks.push('优先方向：');
-  (priorityItems.length ? priorityItems : ['先执行最小可逆动作并跟踪核心指标']).forEach((item, idx) => {
-    blocks.push(`${idx + 1}. ${item}`);
-  });
-
-  return blocks.join('\n');
-}
-
-function stripWeakeningLanguage(text) {
-  return String(text || '')
-    .replace(/样本少[^。；\n]*[。；]?/g, '')
-    .replace(/可用新闻仅\\d+条[^。；\n]*[。；]?/g, '')
-    .replace(/业务相关仅\\d+条[^。；\n]*[。；]?/g, '')
-    .replace(/信息不足[^。；\n]*[。；]?/g, '')
-    .replace(/新闻不足[^。；\n]*[。；]?/g, '')
-    .replace(/信号不足[^。；\n]*[。；]?/g, '')
-    .replace(/无关业务[^。；\n]*[。；]?/g, '')
-    .replace(/（\s*当日\s*）/g, '')
-    .replace(/\(\s*当日\s*\)/g, '')
-    .trim();
-}
-
 function renderParagraphs(text) {
   const paragraphs = String(text || '')
     .split(/\n{2,}/)
@@ -246,36 +48,59 @@ function renderParagraphs(text) {
   ));
 }
 
-function parseStructuredAssistantPayload(rawText) {
-  const text = String(rawText || '').trim();
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const title = String(parsed.title || '').trim();
-    const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
-    const sections = sectionsRaw
-      .map((section) => ({
-        heading: String(section?.heading || '').trim(),
-        bullets: (Array.isArray(section?.bullets) ? section.bullets : [])
-          .map((bullet) => String(bullet || '').trim())
-          .filter(Boolean)
-      }))
-      .filter((section) => section.heading && section.bullets.length > 0);
-    const citations = (Array.isArray(parsed.citations) ? parsed.citations : [])
-      .map((item) => ({
-        id: String(item?.id || '').trim(),
-        title: String(item?.title || '').trim(),
-        url: String(item?.url || '').trim(),
-        source: String(item?.source || '').trim(),
-        published_at: String(item?.published_at || '').trim()
-      }))
-      .filter((item) => item.url);
-    if (!title && sections.length === 0) return null;
-    return { title, sections, citations };
-  } catch {
-    return null;
-  }
+function parseAiV2Payload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const cards = payload.cards && typeof payload.cards === 'object' ? payload.cards : {};
+  const sections = [
+    {
+      heading: '结论',
+      bullets: [String(payload.answer || cards.headline || '').trim()].filter(Boolean)
+    },
+    {
+      heading: '关键驱动',
+      bullets: (Array.isArray(cards.key_drivers) ? cards.key_drivers : [])
+        .map((v) => String(v || '').trim())
+        .filter(Boolean)
+    },
+    {
+      heading: '影响路径',
+      bullets: (Array.isArray(cards.impacts) ? cards.impacts : [])
+        .map((v) => String(v || '').trim())
+        .filter(Boolean)
+    },
+    {
+      heading: '建议动作',
+      bullets: (Array.isArray(cards.actions) ? cards.actions : [])
+        .map((a) => {
+          const p = String(a?.priority || '').trim();
+          const t = String(a?.title || '').trim();
+          const w = String(a?.why || '').trim();
+          const o = String(a?.owner_suggest || '').trim();
+          const tf = String(a?.timeframe || '').trim();
+          if (!t) return '';
+          return `${p ? `${p} · ` : ''}${t}${w ? `｜${w}` : ''}${o ? `｜Owner: ${o}` : ''}${tf ? `｜${tf}` : ''}`;
+        })
+        .filter(Boolean)
+    }
+  ].filter((s) => s.bullets.length > 0);
+
+  const sources = (Array.isArray(payload.sources) ? payload.sources : [])
+    .map((src) => ({
+      news_id: String(src?.news_id || '').trim(),
+      title: String(src?.title || '').trim(),
+      url: String(src?.url || '').trim(),
+      source: String(src?.domain || src?.source || '').trim(),
+      published_at: String(src?.published_at || '').trim(),
+      score: Number(src?.score || 0)
+    }))
+    .filter((item) => item.url);
+
+  return {
+    title: String(cards.headline || 'Insight Copilot').trim(),
+    sections,
+    sources,
+    reasoningView: payload.reasoning_view && typeof payload.reasoning_view === 'object' ? payload.reasoning_view : null
+  };
 }
 
 function renderSections(message) {
@@ -300,246 +125,6 @@ function renderSections(message) {
   );
 }
 
-async function fetchLatestDailyBrief() {
-  const response = await fetch('/api/daily_brief');
-  if (!response.ok) {
-    throw new Error(`daily_brief http ${response.status}`);
-  }
-  const payload = await response.json();
-  if (!Array.isArray(payload) || payload.length === 0) {
-    return null;
-  }
-  return payload[0];
-}
-
-function normalizeDailyBrief(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  return {
-    headline: String(raw.headline || '').trim(),
-    oneLiner: String(raw.one_liner || '').trim(),
-    topDrivers: parseMaybeJson(raw.top_drivers, []),
-    impacts: parseMaybeJson(raw.impacts, {}),
-    actions: parseMaybeJson(raw.actions, []),
-    citations: parseMaybeJson(raw.citations, []),
-    stats: parseMaybeJson(raw.stats, {}),
-    generatedAt: String(raw.generated_at || '').trim()
-  };
-}
-
-function isHttpUrl(value) {
-  return /^https?:\/\//i.test(String(value || '').trim());
-}
-
-function buildEvidenceLinks(brief, news) {
-  const newsMap = new Map();
-  (news || []).forEach((item) => {
-    const id = String(item?.id || '').trim();
-    const url = String(item?.originalUrl || '').trim();
-    if (id && url && isHttpUrl(url)) {
-      newsMap.set(id, url);
-    }
-  });
-
-  const rawEvidence = [];
-  if (Array.isArray(brief?.citations)) {
-    brief.citations.forEach((item) => {
-      const value = String(item || '').trim();
-      if (value) rawEvidence.push(value);
-    });
-  }
-  if (Array.isArray(brief?.topDrivers)) {
-    brief.topDrivers.forEach((driver) => {
-      if (Array.isArray(driver?.signals)) {
-        driver.signals.forEach((signal) => {
-          const value = String(signal || '').trim();
-          if (value) rawEvidence.push(value);
-        });
-      }
-    });
-  }
-
-  const links = rawEvidence
-    .map((value) => {
-      if (isHttpUrl(value)) return value;
-      return newsMap.get(value) || '';
-    })
-    .filter((value) => isHttpUrl(value));
-
-  return [...new Set(links)].slice(0, 6);
-}
-
-function buildSampleQuestionAnswer(question, brief, news) {
-  const q = String(question || '').trim();
-  const drivers = Array.isArray(brief?.topDrivers) ? brief.topDrivers.slice(0, 3) : [];
-  const actions = Array.isArray(brief?.actions) ? brief.actions : [];
-  const impacts = brief?.impacts && typeof brief.impacts === 'object' ? brief.impacts : {};
-  const evidenceLinks = buildEvidenceLinks(brief, news);
-  const defaultDriver =
-    drivers[0] ||
-    ({
-      title: '外部信号分散',
-      why_it_matters: '当前判断主要依赖支付与转化链路的短期变化。'
-    });
-
-  const p0Action =
-    actions.find((item) => String(item?.priority || '').toUpperCase() === 'P0') ||
-    actions[0] ||
-    ({
-      priority: 'P0',
-      owner: '战略',
-      timeframe: '24-72h',
-      action: '先保留最小可逆动作并持续跟踪转化、回款与留存三项核心指标。'
-    });
-
-  let paragraph1 = '';
-  if (q.includes('最值得质疑')) {
-    paragraph1 = `最值得质疑的假设是“${defaultDriver.title}会在短期内持续成立”。如果这个假设被打破，当前结论“${brief?.headline || '优先稳住支付与转化'}”的优先级就需要立即重排。`;
-  } else if (q.includes('只能保留一个行动')) {
-    paragraph1 = `如果只能保留一个行动，建议保留“${p0Action.action}”。这是当前唯一同时覆盖需求验证、风险对冲和执行时效的动作。`;
-  } else {
-    const underestimated = String(impacts?.payments_risk || impacts?.conversion || impacts?.competition || '').trim();
-    paragraph1 = `最容易被低估的风险是${underestimated || '支付链路的局部波动会先打穿转化，再传导到留存和现金回收'}。这个风险不会先体现在口径上，而会先体现在订单完成率与账期延长。`;
-  }
-
-  const driverLine = drivers
-    .map((item, idx) => {
-      const title = String(item?.title || `驱动${idx + 1}`).trim();
-      const why = stripWeakeningLanguage(String(item?.why_it_matters || '').trim());
-      return why ? `${title}（${why}）` : title;
-    })
-    .filter(Boolean)
-    .join('；');
-
-  const impactLine = [
-    String(impacts?.merchant_demand || '').trim(),
-    String(impacts?.acquisition || '').trim(),
-    String(impacts?.conversion || '').trim(),
-    String(impacts?.payments_risk || '').trim()
-  ]
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('；');
-
-  const cleanOneLiner = stripWeakeningLanguage(brief?.oneLiner || '先验证关键链路，再扩大投入');
-  const paragraph2 = `依据：今日结论为“${brief?.headline || '维持基线并优先做可逆动作'}”，其解释是“${cleanOneLiner || '先验证关键链路，再扩大投入'}”。驱动信息显示${driverLine || '外部变化集中在支付与转化环节'}。影响拆解进一步提示${impactLine || '短周期优先关注转化和支付稳定性'}。`;
-
-  const owner = String(p0Action?.owner || '待定').trim();
-  const timeframe = String(p0Action?.timeframe || '24-72h').trim();
-  const paragraph3 = `下一步建议：由${owner}在${timeframe}内先落地该动作，并同步设定一组可回滚阈值（转化率、支付成功率、退款/拒付率）。若48小时内指标没有改善，就保守收缩增量投入并切换到备用动作。${evidenceLinks.length ? '证据来源见下方链接。' : ''}`;
-
-  return {
-    text: sanitizePlainText([paragraph1, paragraph2, paragraph3].join('\n\n')),
-    sources: evidenceLinks.map((url, idx) => ({
-      title: `证据链接 ${idx + 1}`,
-      url,
-      source: 'daily_brief'
-    }))
-  };
-}
-
-function buildExposureMatrix(scoreBreakdown) {
-  const dims = ['subscription', 'commission', 'payment', 'ecosystem'];
-  return dims.map((id) => {
-    const baseline = scoreBreakdown?.baseline?.[id] || 0;
-    const delta = scoreBreakdown?.delta?.[id] || 0;
-    const final = scoreBreakdown?.final?.[id] || 0;
-    const exposureIndex = Number(((baseline * Math.abs(delta)) / 100).toFixed(2));
-
-    return {
-      id,
-      name: DIMENSION_META[id].label,
-      externalRisk: baseline,
-      internalSensitivity: Math.abs(delta),
-      exposureIndex,
-      final
-    };
-  });
-}
-
-function buildPriorityRanking(exposureMatrix) {
-  return [...exposureMatrix]
-    .sort((a, b) => b.exposureIndex - a.exposureIndex)
-    .map((item) => item.name);
-}
-
-function buildReasoningStructure(scoreBreakdown, exposureMatrix, priorityRanking, news) {
-  const newsMap = new Map((news || []).map((item) => [item.id, item]));
-
-  return exposureMatrix.map((item) => {
-    const evidenceIds = scoreBreakdown?.evidence?.[item.id] || [];
-    return {
-      id: item.id,
-      name: item.name,
-      baseline: scoreBreakdown?.baseline?.[item.id] || 0,
-      delta: scoreBreakdown?.delta?.[item.id] || 0,
-      final: scoreBreakdown?.final?.[item.id] || 0,
-      priority: priorityRanking.indexOf(item.name) + 1,
-      evidenceIds,
-      evidenceTitles: evidenceIds.map((id) => newsMap.get(id)?.title).filter(Boolean).slice(0, 5)
-    };
-  });
-}
-
-function buildFallbackAnswer(question, scoreBreakdown, priorityRanking) {
-  const final = scoreBreakdown?.final?.overall || 0;
-  return [
-    '【战略判断】',
-    `当前 Final 评分 ${final}，建议优先按暴露排序推进：${priorityRanking.slice(0, 2).join('、')}。`,
-    '',
-    '【关键影响因素】',
-    '- 外部 Baseline 信号仍在中高位波动。',
-    '- 内部策略参数变化对支付与佣金维度更敏感。',
-    '',
-    '【建议行动】',
-    '- 先处理 P0 维度并建立周度回看。',
-    '- 将问题拆为 2 周实验，按 Final 变化复盘。',
-    `- 当前问题：${question}`
-  ].join('\n');
-}
-
-function toUtc8Date(raw) {
-  const text = String(raw || '').trim();
-  if (!text) return null;
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Date(date.getTime() + 8 * 60 * 60 * 1000);
-}
-
-function utc8DayKeyFromDate(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function buildRecentUtc8DaySet(days = 7) {
-  const base = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  const daySet = new Set();
-  for (let i = 0; i < days; i += 1) {
-    const d = new Date(base.getTime() - i * 24 * 60 * 60 * 1000);
-    daySet.add(utc8DayKeyFromDate(d));
-  }
-  return daySet;
-}
-
-function isNewsSummaryQuestion(question) {
-  const q = String(question || '').toLowerCase();
-  return (
-    (/总结|汇总|概览|盘点/.test(q) && /新闻|情报|动态/.test(q)) ||
-    (/近7天|最近7天|过去7天|一周|本周/.test(q) && /新闻|情报|动态/.test(q))
-  );
-}
-
-function pickRecentNewsItems(news, days = 7, limit = 12) {
-  const daySet = buildRecentUtc8DaySet(days);
-  return (news || [])
-    .filter((item) => daySet.has(utc8DayKeyFromDate(toUtc8Date(item?.createdAt) || new Date(0))))
-    .sort((a, b) => (Number(b?.impactScore) || 0) - (Number(a?.impactScore) || 0))
-    .map((item) => ({
-      title: String(item?.title || '').trim(),
-      summary: String(item?.summary || item?.aiTldr || '').trim()
-    }))
-    .filter((item) => Boolean(item.title))
-    .slice(0, limit);
-}
-
 function AssistantBubble({ message, onOpenEvidence }) {
   const [showStructure, setShowStructure] = useState(false);
 
@@ -561,7 +146,7 @@ function AssistantBubble({ message, onOpenEvidence }) {
 
         <div className="space-y-2.5 text-sm leading-[1.62] text-slate-100">
           {message.pending && !message.text
-            ? renderParagraphs('正在基于当前评分与暴露矩阵生成策略回答...')
+            ? renderParagraphs('正在模拟不同决策路径的风险与收益…')
             : renderSections(message)}
         </div>
 
@@ -595,7 +180,7 @@ function AssistantBubble({ message, onOpenEvidence }) {
 
         {message.error ? <p className="mt-2 text-xs text-rose-300">{message.error}</p> : null}
 
-        {message.structure ? (
+        {message.reasoningView ? (
           <div className="mt-3">
             <button
               type="button"
@@ -607,36 +192,42 @@ function AssistantBubble({ message, onOpenEvidence }) {
 
             {showStructure ? (
               <div className="mt-3 space-y-3 rounded-xl border border-slate-700 bg-slate-950/60 p-3">
-                {message.structure.map((item) => (
-                  <div key={item.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-                    <p className="text-xs text-cyan-200">
-                      {item.name} · 优先级 P{item.priority}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-300">
-                      Baseline {item.baseline} / Δ {item.delta > 0 ? `+${item.delta}` : item.delta} / Final {item.final}
-                    </p>
-                    {item.evidenceTitles.length ? (
-                      <div className="mt-2 space-y-1 text-[11px] text-slate-400">
-                        {item.evidenceTitles.map((title) => (
-                          <p key={title}>- {title}</p>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-300 space-y-2">
+                  <p>意图识别：{message.reasoningView.intent || '-'}</p>
+                  <p>时间窗口：{message.reasoningView.time_range || '-'}</p>
+                  <p>
+                    检索命中：{message.reasoningView.retrieval?.returned ?? 0} / {message.reasoningView.retrieval?.total_candidates ?? 0}
+                  </p>
+                  <p>检索策略：{message.reasoningView.retrieval?.strategy || 'hybrid'}</p>
+                  {Array.isArray(message.reasoningView.clusters) && message.reasoningView.clusters.length ? (
+                    <p>聚类主题：{message.reasoningView.clusters.join(' / ')}</p>
+                  ) : null}
+                  {Array.isArray(message.reasoningView.synthesis_steps) && message.reasoningView.synthesis_steps.length ? (
+                    <div>
+                      <p className="text-cyan-200">生成步骤：</p>
+                      <div className="mt-1 space-y-1">
+                        {message.reasoningView.synthesis_steps.map((step, idx) => (
+                          <p key={`${step}-${idx}`}>{idx + 1}. {step}</p>
                         ))}
                       </div>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpenEvidence({
-                          id: `ev-ai-${item.id}`,
-                          title: `AI 对话引用 · ${item.name}`,
-                          newsIds: item.evidenceIds
-                        })
-                      }
-                      className="mt-2 rounded-lg border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
-                    >
-                      查看证据新闻
-                    </button>
-                  </div>
-                ))}
+                    </div>
+                  ) : null}
+                </div>
+                {Array.isArray(message.sources) && message.sources.length ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenEvidence({
+                        id: `ev-ai-v2-${message.id}`,
+                        title: 'AI 对话引用新闻',
+                        newsIds: message.sources.map((s) => s.news_id).filter(Boolean)
+                      })
+                    }
+                    className="rounded-lg border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+                  >
+                    查看证据新闻
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -646,26 +237,22 @@ function AssistantBubble({ message, onOpenEvidence }) {
   );
 }
 
-function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence }) {
+function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
       role: 'assistant',
-      text: '我会基于 Baseline + Delta + 暴露矩阵回答，不会重算核心评分。',
+      text: '基于全球信号生成可执行决策。',
+      title: '🧠 Insight Copilot',
+      sections: [],
+      sources: [],
+      reasoningView: null,
       structure: null,
       pending: false,
       error: ''
     }
   ]);
-  const [latestBrief, setLatestBrief] = useState(null);
-
-  const exposureMatrix = useMemo(() => buildExposureMatrix(scoreBreakdown), [scoreBreakdown]);
-  const priorityRanking = useMemo(() => buildPriorityRanking(exposureMatrix), [exposureMatrix]);
-  const structure = useMemo(
-    () => buildReasoningStructure(scoreBreakdown, exposureMatrix, priorityRanking, news),
-    [scoreBreakdown, exposureMatrix, priorityRanking, news]
-  );
 
   if (!open) return null;
 
@@ -694,7 +281,7 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
         title: '',
         sections: [],
         sources: [],
-        structure,
+        reasoningView: null,
         pending: true,
         error: ''
       }
@@ -702,89 +289,62 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
     setInput('');
 
     try {
-      const fullAnswer = await streamAiChat(
-        {
-          userQuestion: question,
-          baseline: scoreBreakdown?.baseline?.overall || 0,
-          delta: scoreBreakdown?.delta?.overall || 0,
-          finalScore: scoreBreakdown?.final?.overall || 0,
-          exposureMatrix,
-          priorityRanking
-        },
-        {
-          onToken: (token) => {
-            setMessages((prev) =>
-              prev.map((item) =>
-                item.id === assistantId
-                  ? { ...item, text: `${item.text}${token}` }
-                  : item
-              )
-            );
-          },
-          onSources: (sources) => {
-            setMessages((prev) => prev.map((item) => (item.id === assistantId ? { ...item, sources } : item)));
-          }
-        }
-      );
+      let mode = 'auto';
+      let rangeDays = 3;
+      if (/近7天|最近7天|过去7天|一周|7天/.test(question)) {
+        mode = 'news_summary';
+        rangeDays = 7;
+      } else if (/近3天|最近3天|过去3天|三天|总结|汇总|盘点|扫描/.test(question)) {
+        mode = 'news_summary';
+        rangeDays = 3;
+      } else if (/今天|今日/.test(question)) {
+        mode = 'brief_today';
+        rangeDays = 1;
+      }
 
-      const structured = parseStructuredAssistantPayload(fullAnswer);
+      const payload = await askAiChatV2({
+        query: question,
+        mode,
+        range_days: rangeDays,
+        top_k: 12,
+        timezone: '+08:00',
+        debug: true
+      });
+
+      const structured = parseAiV2Payload(payload);
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantId
             ? {
                 ...item,
-                text: structured ? '' : formatStructuredSections(sanitizePlainText(fullAnswer)),
+                text: structured ? '' : sanitizePlainText(payload.answer || ''),
                 title: structured?.title || '',
                 sections: structured?.sections || [],
-                sources: structured?.citations?.length ? structured.citations : item.sources,
+                sources: structured?.sources || [],
+                reasoningView: structured?.reasoningView || null,
                 pending: false
               }
             : item
         )
       );
     } catch (error) {
-      const fallback = isSample
-        ? buildSampleQuestionAnswer(
-            question,
-            normalizeDailyBrief(latestBrief) || {
-              headline: '外部信号分散，先执行最小可逆动作',
-              oneLiner: '当前优先稳住支付与转化基本盘，再依据内部指标扩大动作。',
-              topDrivers: [],
-              impacts: {},
-              actions: [],
-              citations: [],
-              stats: {}
-            },
-            news
-          )
-        : buildFallbackAnswer(question, scoreBreakdown, priorityRanking);
-      const fallbackText = typeof fallback === 'string' ? fallback : fallback.text;
-      const fallbackSources = typeof fallback === 'string' ? [] : fallback.sources;
-      const fallbackStructured = {
-        title: '策略兜底建议',
-        sections: [
-          {
-            heading: '当前判断',
-            bullets: ['当前已用信号可支持先执行最小可逆动作，并同步验证关键指标。']
-          },
-          {
-            heading: '下一步动作',
-            bullets: ['优先关注转化率、支付成功率与退款/拒付率，48小时内回看。']
-          }
-        ]
-      };
-
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantId
             ? {
                 ...item,
-                text: formatStructuredSections(sanitizePlainText(item.text || fallbackText)),
-                title: fallbackStructured.title,
-                sections: fallbackStructured.sections,
-                sources: item.sources && item.sources.length > 0 ? item.sources : fallbackSources,
+                text: '',
+                title: '检索失败',
+                sections: [
+                  {
+                    heading: '系统提示',
+                    bullets: ['当前请求失败，请稍后重试；如持续失败请检查后端日志与 LLM 配置。']
+                  }
+                ],
+                sources: [],
+                reasoningView: null,
                 pending: false,
-                error: isSample ? '' : 'AI 服务暂不可用，已返回规则引擎兜底建议。'
+                error: String(error?.message || error || 'AI 服务暂不可用')
               }
             : item
         )
@@ -797,7 +357,10 @@ function AIAssistantPanel({ open, onClose, scoreBreakdown, news, onOpenEvidence 
       <div className="absolute inset-0 bg-slate-950/70" onClick={onClose} />
       <aside className="absolute right-0 top-0 h-full w-full max-w-md animate-[slideIn_220ms_ease-out] border-l border-cyan-300/20 bg-slate-950/95 p-5 backdrop-blur-xl">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-100">🧠 向 AI 询问战略问题</h3>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-100">🧠 Insight Copilot</h3>
+            <p className="mt-0.5 text-xs text-slate-400">基于全球信号生成可执行决策</p>
+          </div>
           <button
             type="button"
             onClick={onClose}
