@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -82,6 +84,53 @@ def _cn_or_fallback(text: str, fallback: str) -> str:
     if _is_english_heavy(cleaned) and not _has_cjk(cleaned):
         return fallback
     return cleaned
+
+
+def _norm_for_similarity(text: str) -> str:
+    lowered = str(text or "").lower()
+    lowered = re.sub(r"https?://\S+", " ", lowered)
+    lowered = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
+    return lowered.strip()
+
+
+def _headline_too_close_to_news(headline: str, input_news: list[dict[str, Any]]) -> bool:
+    h = _norm_for_similarity(headline)
+    if not h:
+        return True
+
+    # 强约束：英文重、或引号新闻句式，直接判为风险标题
+    if _is_english_heavy(headline):
+        return True
+    if any(q in str(headline or "") for q in ("'", '"', "“", "”", "CEO")) and len(h) >= 12:
+        return True
+
+    for item in input_news[:10]:
+        title = _norm_for_similarity(str(item.get("title") or ""))
+        if not title:
+            continue
+        if h in title or title in h:
+            return True
+        ratio = SequenceMatcher(None, h, title).ratio()
+        if ratio >= 0.62:
+            return True
+    return False
+
+
+def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[dict[str, Any]]) -> str:
+    cleaned = _strip_disallowed_terms(_normalize_text(headline))
+    if not cleaned:
+        return "外部信号分散，先执行可逆验证策略"
+    if not _headline_too_close_to_news(cleaned, input_news):
+        return cleaned
+
+    base = _strip_disallowed_terms(_normalize_text(one_liner))
+    if base:
+        # 从解释句抽象成“结论句”，避免复制新闻标题
+        base = base.replace("。", "").replace("，", " ")
+        if len(base) > 24:
+            base = base[:24].rstrip()
+        return f"{base}，先做可逆验证".strip("， ")
+    return "外部信号未成单一主线，先做可逆验证"
 
 
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
@@ -220,6 +269,7 @@ def _build_prompt(*, input_news: list[dict[str, Any]], style: str, low_sample: b
 5) 引用必须来自输入新闻的 id 或 url（signals/citations 只能从输入里选），不允许编造。
 6) 只输出严格 JSON，不要 Markdown，不要解释。
 7) 不允许使用“...”或“…”省略信息，必须输出完整句子。
+8) headline 禁止直接复用输入新闻标题、引号原句或人物原话（如 CEO 原话）；必须抽象成“公司动作导向结论”。
 
 【低样本/低相关日处理规则（非常重要）】
 - 即使可用新闻很少或相关性低，也必须输出“噪声日结论”而不是“样本少”。
@@ -294,11 +344,12 @@ def _normalize_brief(
     scanned: int,
     low_sample: bool,
 ) -> dict[str, Any]:
-    headline = _cn_or_fallback(
+    raw_headline = _cn_or_fallback(
         _normalize_text(raw.get("headline")),
         "外部信号分散，执行最小可逆策略并加密验证",
     )
     one_liner = _strip_disallowed_terms(_normalize_text(raw.get("one_liner"))) or "外部冲击尚不集中，先以低成本动作验证需求、支付和履约关键指标。"
+    headline = _rewrite_headline_if_needed(raw_headline, one_liner, input_news)
 
     top_drivers: list[dict[str, Any]] = []
     if isinstance(raw.get("top_drivers"), list):
@@ -413,15 +464,8 @@ def _normalize_brief(
 
 def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: bool) -> dict[str, Any]:
     top = input_news[:3]
-    if top:
-        anchor = _normalize_text(top[0].get("title"))
-        headline = _strip_disallowed_terms(_normalize_text(f"{anchor}触发最小可逆策略"))
-        one_liner = _strip_disallowed_terms(
-            _normalize_text("外部信号尚未形成单一主线，先执行低成本可逆动作并通过核心指标验证方向。")
-        )
-    else:
-        headline = "外部信号分散，执行最小可逆策略"
-        one_liner = "暂无明确新增冲击，先维持基线动作并聚焦验证转化、支付与履约关键指标。"
+    headline = "外部信号分散，先执行可逆验证策略"
+    one_liner = "当前高影响事件尚未收敛为单一主线，优先低成本试运行，并用转化、支付、履约指标验证方向。"
 
     return _normalize_brief(
         {
