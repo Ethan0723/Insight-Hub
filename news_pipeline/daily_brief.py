@@ -121,6 +121,14 @@ def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[
     cleaned = _strip_disallowed_terms(_normalize_text(headline))
     if not cleaned:
         return "外部信号分散，先执行可逆验证策略"
+    if _is_english_heavy(cleaned) and not _has_cjk(cleaned):
+        base = _strip_disallowed_terms(_normalize_text(one_liner))
+        if base:
+            base = base.replace("。", "").replace("，", " ")
+            if len(base) > 20:
+                base = base[:20].rstrip()
+            return f"{base}，先做可逆验证"
+        return "外部变量波动上升，先做可逆验证"
     if cleaned.startswith("外部信号分散"):
         base = _strip_disallowed_terms(_normalize_text(one_liner))
         if base:
