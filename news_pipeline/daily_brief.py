@@ -121,13 +121,20 @@ def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[
     cleaned = _strip_disallowed_terms(_normalize_text(headline))
     if not cleaned:
         return "外部信号分散，先执行可逆验证策略"
-    if cleaned.startswith("外部信号分散") and input_news:
-        seed = _normalize_text(input_news[0].get("title"))
-        if seed:
-            seed = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", " ", seed).strip()
-            if len(seed) > 16:
-                seed = seed[:16].rstrip()
-            return f"{seed}带来经营扰动，先做可逆验证"
+    if cleaned.startswith("外部信号分散"):
+        base = _strip_disallowed_terms(_normalize_text(one_liner))
+        if base:
+            base = base.replace("。", "").replace("，", " ")
+            if len(base) > 20:
+                base = base[:20].rstrip()
+            return f"{base}，先做可逆验证"
+        if input_news:
+            seed = _normalize_text(input_news[0].get("title"))
+            if seed:
+                seed = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", " ", seed).strip()
+                if len(seed) > 16:
+                    seed = seed[:16].rstrip()
+                return f"{seed}带来经营扰动，先做可逆验证"
     if not _headline_too_close_to_news(cleaned, input_news):
         return cleaned
 
@@ -560,7 +567,16 @@ def _normalize_brief(
 
 def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: bool) -> dict[str, Any]:
     top = input_news[:3]
-    headline = "外部信号分散，先执行可逆验证策略"
+    lead = top[0] if top else {}
+    lead_summary = _normalize_text(lead.get("summary"))
+    lead_title = _normalize_text(lead.get("title"))
+    seed = lead_summary or lead_title
+    if _is_english_heavy(seed) and not _has_cjk(seed):
+        seed = "关键外部变量波动"
+    seed = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", " ", seed).strip() or "关键外部变量波动"
+    if len(seed) > 16:
+        seed = seed[:16].rstrip()
+    headline = f"{seed}触发跨团队验证与策略预案"
     one_liner = "当前高影响事件尚未收敛为单一主线，优先低成本试运行，并用转化、支付、履约指标验证方向。"
 
     return _normalize_brief(
