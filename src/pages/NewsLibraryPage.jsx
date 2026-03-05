@@ -12,9 +12,9 @@ function NewsLibraryPage({
   onOpenEvidence,
   indexMap
 }) {
+  const HIGH_PAGE_SIZE = 9;
+  const LOW_PAGE_SIZE = 9;
   const [query, setQuery] = useState({
-    page: 1,
-    pageSize: 9,
     sortBy: 'time',
     platforms: [],
     regions: [],
@@ -26,8 +26,10 @@ function NewsLibraryPage({
     dateTo: '',
     ids: []
   });
-  const [newsPage, setNewsPage] = useState({ list: [], total: 0, page: 1, pageSize: 9 });
-  const [lowImpactList, setLowImpactList] = useState([]);
+  const [highImpactAll, setHighImpactAll] = useState([]);
+  const [lowImpactAll, setLowImpactAll] = useState([]);
+  const [highPage, setHighPage] = useState(1);
+  const [lowPage, setLowPage] = useState(1);
   const [stats, setStats] = useState({ total: 0, highRisk: 0, thisWeek: 0, avgImpact: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -37,7 +39,9 @@ function NewsLibraryPage({
 
   useEffect(() => {
     if (!initialQuery) return;
-    setQuery((prev) => ({ ...prev, ...initialQuery, page: 1 }));
+    setQuery((prev) => ({ ...prev, ...initialQuery }));
+    setHighPage(1);
+    setLowPage(1);
   }, [initialQuery]);
 
   useEffect(() => {
@@ -49,17 +53,10 @@ function NewsLibraryPage({
       .searchNews({ ...query, page: 1, pageSize: 5000 })
       .then((fullRes) => {
         if (!mounted) return;
-        const highImpactAll = fullRes.list.filter((item) => item.impactScore > 20);
-        const lowImpactAll = fullRes.list.filter((item) => item.impactScore <= 20);
-        const start = (query.page - 1) * query.pageSize;
-        const end = start + query.pageSize;
-        setNewsPage({
-          list: highImpactAll.slice(start, end),
-          total: highImpactAll.length,
-          page: query.page,
-          pageSize: query.pageSize
-        });
-        setLowImpactList(lowImpactAll);
+        const highAll = fullRes.list.filter((item) => item.impactScore > 20);
+        const lowAll = fullRes.list.filter((item) => item.impactScore <= 20);
+        setHighImpactAll(highAll);
+        setLowImpactAll(lowAll);
 
         const now = new Date();
         const highRisk = fullRes.list.filter((item) => item.riskLevel === '高').length;
@@ -91,19 +88,36 @@ function NewsLibraryPage({
     };
   }, [query]);
 
+  useEffect(() => {
+    const total = Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
+    if (highPage > total) setHighPage(total);
+  }, [highImpactAll.length, highPage]);
+
+  useEffect(() => {
+    const total = Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
+    if (lowPage > total) setLowPage(total);
+  }, [lowImpactAll.length, lowPage]);
+
   const allPlatforms = useMemo(() => ['Shopify', 'Shopline', 'Shoplazza', 'Amazon', 'TikTok Shop', 'Temu'], []);
   const allRegions = useMemo(() => ['US', 'EU', 'UK', 'SEA', 'Global'], []);
   const allModules = useMemo(() => ['政策', '平台', '财报', '支付', '广告', '物流', 'AI', '宏观'], []);
   const allDims = useMemo(() => ['订阅', '佣金', '支付', '生态'], []);
 
-  const totalPages = Math.max(1, Math.ceil(newsPage.total / query.pageSize));
+  const highTotalPages = Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
+  const lowTotalPages = Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
+  const highStart = (highPage - 1) * HIGH_PAGE_SIZE;
+  const lowStart = (lowPage - 1) * LOW_PAGE_SIZE;
+  const highPageList = highImpactAll.slice(highStart, highStart + HIGH_PAGE_SIZE);
+  const lowPageList = lowImpactAll.slice(lowStart, lowStart + LOW_PAGE_SIZE);
 
   const updateMulti = (field, value) => {
     setQuery((prev) => {
       const list = prev[field] || [];
       const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
-      return { ...prev, [field]: next, page: 1 };
+      return { ...prev, [field]: next };
     });
+    setHighPage(1);
+    setLowPage(1);
   };
 
   const getNewsReferenceIds = (newsId) =>
@@ -124,7 +138,9 @@ function NewsLibraryPage({
   };
 
   const applySavedView = (view) => {
-    setQuery({ ...query, ...view.query, page: 1 });
+    setQuery({ ...query, ...view.query });
+    setHighPage(1);
+    setLowPage(1);
   };
 
   const removeSavedView = (id) => {
@@ -137,7 +153,7 @@ function NewsLibraryPage({
       '',
       `生成时间: ${new Date().toLocaleString()}`,
       '',
-      ...newsPage.list.map(
+      ...highPageList.map(
         (item, index) =>
           `${index + 1}. **${item.title}**\n   - 来源: ${item.source}\n   - 时间: ${item.publishDate}\n   - 风险: ${item.riskLevel} | 影响评分: ${item.impactScore}\n   - TL;DR: ${item.aiTldr}\n   - 链接: ${item.originalUrl}`
       )
@@ -177,7 +193,7 @@ function NewsLibraryPage({
           <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">平均影响评分</p><p className="mt-2 text-2xl text-fuchsia-200">{stats.avgImpact}</p></div>
           <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3">
             <p className="text-xs text-slate-400">排序方式</p>
-            <select value={query.sortBy} onChange={(e) => setQuery((prev) => ({ ...prev, sortBy: e.target.value, page: 1 }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200">
+            <select value={query.sortBy} onChange={(e) => { setQuery((prev) => ({ ...prev, sortBy: e.target.value })); setHighPage(1); setLowPage(1); }} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200">
               <option value="time">按发布时间</option>
               <option value="impact">按影响评分</option>
               <option value="risk">按风险等级</option>
@@ -219,13 +235,13 @@ function NewsLibraryPage({
           </div>
           <div className="xl:col-span-1">
             <p className="mb-2 text-xs text-slate-400">起始日期</p>
-            <input type="date" value={query.dateFrom} onChange={(e) => setQuery((prev) => ({ ...prev, dateFrom: e.target.value, page: 1 }))} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
-            <input type="date" value={query.dateTo} onChange={(e) => setQuery((prev) => ({ ...prev, dateTo: e.target.value, page: 1 }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
+            <input type="date" value={query.dateFrom} onChange={(e) => { setQuery((prev) => ({ ...prev, dateFrom: e.target.value })); setHighPage(1); setLowPage(1); }} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
+            <input type="date" value={query.dateTo} onChange={(e) => { setQuery((prev) => ({ ...prev, dateTo: e.target.value })); setHighPage(1); setLowPage(1); }} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
           </div>
         </div>
 
         <div className="mt-4">
-          <input value={query.keyword} onChange={(e) => setQuery((prev) => ({ ...prev, keyword: e.target.value, page: 1 }))} placeholder="关键词搜索（标题 + 摘要 + 实体）" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500" />
+          <input value={query.keyword} onChange={(e) => { setQuery((prev) => ({ ...prev, keyword: e.target.value })); setHighPage(1); setLowPage(1); }} placeholder="关键词搜索（标题 + 摘要 + 实体）" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500" />
         </div>
       </div>
 
@@ -237,20 +253,21 @@ function NewsLibraryPage({
             <div key={idx} className="h-72 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
           ))}
         </div>
-      ) : newsPage.list.length === 0 && lowImpactList.length === 0 ? (
+      ) : highPageList.length === 0 && lowPageList.length === 0 ? (
         <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-8 text-center text-slate-400">暂无符合条件的新闻</div>
       ) : (
         <>
-          <div className="space-y-3">
+          <div className="space-y-3 rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.03] p-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-200">主新闻区（Impact &gt; 20）</h3>
-              <span className="text-xs text-slate-400">共 {newsPage.total} 条</span>
+              <span className="text-xs text-cyan-200">共 {highImpactAll.length} 条</span>
             </div>
-            {newsPage.list.length === 0 ? (
+            <p className="text-[11px] text-slate-400">高影响事件区：用于优先决策，建议先看本区。</p>
+            {highPageList.length === 0 ? (
               <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-5 text-sm text-slate-400">当前筛选条件下暂无 Impact &gt; 20 的新闻。</div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {newsPage.list.map((item) => (
+                {highPageList.map((item) => (
                   <StrategicNewsCard
                     key={item.id}
                     news={item}
@@ -269,16 +286,46 @@ function NewsLibraryPage({
                 ))}
               </div>
             )}
+            <div className="flex items-center justify-between rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2">
+              <p className="text-xs text-slate-400">
+                主新闻区第 {highPage} / {highTotalPages} 页
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={highPage <= 1}
+                  onClick={() => setHighPage((prev) => Math.max(1, prev - 1))}
+                  className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  disabled={highPage >= highTotalPages}
+                  onClick={() => setHighPage((prev) => Math.min(highTotalPages, prev + 1))}
+                  className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
           </div>
 
-          {lowImpactList.length > 0 ? (
-            <div className="mt-6 space-y-3 rounded-2xl border border-slate-700/70 bg-slate-900/40 p-4">
+          <div className="mt-4 flex items-center gap-2 px-1">
+            <div className="h-px flex-1 bg-slate-700/70" />
+            <span className="text-[11px] tracking-[0.16em] uppercase text-slate-500">低影响区（可延后阅读）</span>
+            <div className="h-px flex-1 bg-slate-700/70" />
+          </div>
+
+          {lowImpactAll.length > 0 ? (
+            <div className="mt-4 space-y-3 rounded-2xl border border-slate-700/80 bg-slate-900/30 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-200">低影响新闻区（Impact ≤ 20）</h3>
-                <span className="text-xs text-slate-400">共 {lowImpactList.length} 条</span>
+                <span className="text-xs text-slate-400">共 {lowImpactAll.length} 条</span>
               </div>
+              <p className="text-[11px] text-slate-500">背景信号区：用于补充上下文与跟踪长期变化。</p>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {lowImpactList.slice(0, 12).map((item) => (
+                {lowPageList.map((item) => (
                   <StrategicNewsCard
                     key={item.id}
                     news={item}
@@ -296,37 +343,33 @@ function NewsLibraryPage({
                   />
                 ))}
               </div>
-              {lowImpactList.length > 12 ? (
-                <p className="text-xs text-slate-500">仅展示前 12 条低影响新闻，请用筛选进一步缩小范围。</p>
-              ) : null}
+              <div className="flex items-center justify-between rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2">
+                <p className="text-xs text-slate-400">
+                  低影响区第 {lowPage} / {lowTotalPages} 页
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={lowPage <= 1}
+                    onClick={() => setLowPage((prev) => Math.max(1, prev - 1))}
+                    className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    type="button"
+                    disabled={lowPage >= lowTotalPages}
+                    onClick={() => setLowPage((prev) => Math.min(lowTotalPages, prev + 1))}
+                    className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
             </div>
           ) : null}
         </>
       )}
-
-      <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
-        <p className="text-xs text-slate-400">
-          主新闻区第 {newsPage.page} / {totalPages} 页 · 共 {newsPage.total} 条
-        </p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={newsPage.page <= 1}
-            onClick={() => setQuery((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-            className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            上一页
-          </button>
-          <button
-            type="button"
-            disabled={newsPage.page >= totalPages}
-            onClick={() => setQuery((prev) => ({ ...prev, page: Math.min(totalPages, prev.page + 1) }))}
-            className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            下一页
-          </button>
-        </div>
-      </div>
 
       {exportOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
