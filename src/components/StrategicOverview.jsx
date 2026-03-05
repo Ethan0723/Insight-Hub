@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DriversPanel, { buildDriverItems } from "./strategy/DriversPanel";
 import ExpandableText from "./strategy/ExpandableText";
 import { track } from "../lib/analytics";
+import { api } from "../services/api";
 
 const safeText = (value, fallback = "") => {
   const text = String(value || "").trim();
@@ -73,8 +74,45 @@ function buildPriorityActions(brief) {
 function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const [metricsOpen, setMetricsOpen] = useState(true);
   const [citationsOpen, setCitationsOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    return now.toISOString().slice(0, 10);
+  });
+  const [selectedBrief, setSelectedBrief] = useState(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefHint, setBriefHint] = useState("");
 
-  const brief = strategyBrief || {
+  useEffect(() => {
+    let mounted = true;
+    setBriefLoading(true);
+    setBriefHint("");
+
+    api
+      .getDailyBrief(selectedDate)
+      .then((row) => {
+        if (!mounted) return;
+        if (row) {
+          setSelectedBrief(row);
+          return;
+        }
+        setSelectedBrief(null);
+        setBriefHint(`所选日期 ${selectedDate} 暂无 daily_brief，已显示当前可用简报。`);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setSelectedBrief(null);
+        setBriefHint("日期简报读取失败，已显示当前可用简报。");
+      })
+      .finally(() => {
+        if (mounted) setBriefLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedDate]);
+
+  const brief = selectedBrief || strategyBrief || {
     headline: "今日未发现高影响信号",
     one_liner: "暂无可用结论，继续观察。",
     time_window: "今天",
@@ -117,12 +155,34 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
           </div>
 
           <div className="flex items-start gap-1.5 md:flex-col md:items-end">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="brief-date" className="text-[10px] text-slate-400">日期</label>
+              <input
+                id="brief-date"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(String(e.target.value || "").slice(0, 10))}
+                className="rounded-md border border-slate-700 bg-slate-900/85 px-1.5 py-0.5 text-[10px] text-slate-200 outline-none focus:border-cyan-300/50"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+                  setSelectedDate(now.toISOString().slice(0, 10));
+                }}
+                className="rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
+              >
+                今天
+              </button>
+            </div>
             <span className="group relative rounded-full border border-slate-700/90 bg-slate-900/85 px-2 py-0.5 text-[10px] text-slate-300 cursor-default">
               {coverageText}
               <span className="strategic-tooltip">命中=被用于生成结论的新闻条数；数据覆盖=当天扫描条数。</span>
             </span>
             <span className="text-[10px] text-slate-500">{sourceText}</span>
             <span className="text-[10px] text-slate-500">{safeText(brief.time_window, "今天")} (UTC+8)</span>
+            {briefLoading ? <span className="text-[10px] text-cyan-300">加载中...</span> : null}
+            {!briefLoading && briefHint ? <span className="text-[10px] text-amber-300">{briefHint}</span> : null}
           </div>
         </div>
 
