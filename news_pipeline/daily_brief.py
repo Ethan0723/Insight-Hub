@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .ai_client import generate_json_object
-from .supabase_client import fetch_news_raw_for_daily_brief, upsert_daily_brief
+from .supabase_client import fetch_latest_daily_brief_by_date, fetch_news_raw_for_daily_brief, upsert_daily_brief
 
 UTC8 = timezone(timedelta(hours=8))
 PROMPT_VERSION = os.getenv("DAILY_BRIEF_PROMPT_VERSION", "v1")
@@ -18,6 +18,7 @@ FETCH_LIMIT = int(os.getenv("DAILY_BRIEF_FETCH_LIMIT", "120"))
 LLM_MAX_TOKENS = int(os.getenv("DAILY_BRIEF_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "1500")))
 LLM_TEMPERATURE = float(os.getenv("DAILY_BRIEF_TEMPERATURE", "0.2"))
 LLM_TIMEOUT = int(os.getenv("DAILY_BRIEF_TIMEOUT_SEC", "90"))
+QUALITY_GUARD_DELTA = int(os.getenv("DAILY_BRIEF_QUALITY_GUARD_DELTA", "5"))
 
 RISK_WEIGHT = {"高": 3, "中": 2, "低": 1}
 _DISALLOWED_TERMS = ("样本少", "无关业务", "需观察", "新闻不足", "单点风险")
@@ -131,6 +132,90 @@ def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[
             base = base[:24].rstrip()
         return f"{base}，先做可逆验证".strip("， ")
     return "外部信号未成单一主线，先做可逆验证"
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _quality_score(brief_payload: dict[str, Any], input_news: list[dict[str, Any]]) -> int:
+    stats = _as_dict(brief_payload.get("stats"))
+    used = int(stats.get("used") or 0)
+    high_impact = int(stats.get("high_impact") or 0)
+    high_risk = int(stats.get("high_risk") or 0)
+
+    citations = _as_list(brief_payload.get("citations"))
+    valid_keys = set()
+    for n in input_news:
+        nid = str(n.get("id") or "").strip()
+        nurl = str(n.get("url") or "").strip()
+        if nid:
+            valid_keys.add(nid)
+        if nurl:
+            valid_keys.add(nurl)
+    linked = sum(1 for c in citations if str(c or "").strip() in valid_keys)
+
+    actions = _as_list(brief_payload.get("actions"))
+    has_p = {"P0": False, "P1": False, "P2": False}
+    action_filled = 0
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        p = str(a.get("priority") or "").strip()
+        if p in has_p:
+            has_p[p] = True
+        if str(a.get("action") or "").strip():
+            action_filled += 1
+
+    impacts = _as_dict(brief_payload.get("impacts"))
+    impact_fields = ["merchant_demand", "acquisition", "conversion", "payments_risk", "fulfillment", "competition"]
+    impact_filled = sum(1 for k in impact_fields if str(impacts.get(k) or "").strip())
+
+    headline = str(brief_payload.get("headline") or "").strip()
+    one_liner = str(brief_payload.get("one_liner") or "").strip()
+
+    signal_score = min(used, 10) / 10 * 15 + min(high_impact, 5) / 5 * 15 + min(high_risk, 3) / 3 * 10
+    evidence_score = min(len(citations), 6) / 6 * 15 + (linked / max(1, len(citations))) * 10
+    action_score = (sum(1 for v in has_p.values() if v) / 3) * 12 + min(action_filled, 3) / 3 * 8 + (impact_filled / 6) * 5
+    text_score = 10 if headline and one_liner else 0
+
+    penalty = 0.0
+    if _headline_too_close_to_news(headline, input_news):
+        penalty += 8.0
+    if headline.startswith("外部信号分散"):
+        penalty += 4.0
+
+    final_score = max(0, min(100, round(signal_score + evidence_score + action_score + text_score - penalty)))
+    return int(final_score)
+
+
+def _extract_existing_quality(existing_row: dict[str, Any]) -> int:
+    stats = _as_dict(existing_row.get("stats"))
+    q = stats.get("quality_score")
+    try:
+        return int(q)
+    except Exception:
+        return 0
 
 
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
@@ -543,10 +628,24 @@ def generate_daily_brief() -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    new_quality = _quality_score(brief_payload, input_news)
+    row["stats"] = {**_as_dict(row.get("stats")), "quality_score": new_quality}
+
     inserted: dict[str, Any] = {}
     write_error = ""
+    skipped_by_quality_guard = False
+    existing_quality = 0
     try:
-        inserted = upsert_daily_brief(row)
+        existing = fetch_latest_daily_brief_by_date(brief_date=brief_date, prompt_version=PROMPT_VERSION)
+        if existing:
+            existing_quality = _extract_existing_quality(existing)
+            if existing_quality >= new_quality + QUALITY_GUARD_DELTA:
+                skipped_by_quality_guard = True
+                inserted = existing
+            else:
+                inserted = upsert_daily_brief(row)
+        else:
+            inserted = upsert_daily_brief(row)
     except Exception as exc:
         write_error = str(exc)
         print(f"[DAILY_BRIEF][ERROR] upsert failed | error={write_error}")
@@ -565,6 +664,9 @@ def generate_daily_brief() -> dict[str, Any]:
         "one_liner": brief_payload["one_liner"],
         "citations_count": len(brief_payload["citations"]),
         "fallback_used": fallback_used,
+        "quality_score": new_quality,
+        "existing_quality": existing_quality,
+        "skipped_by_quality_guard": skipped_by_quality_guard,
     }
 
 
@@ -578,6 +680,9 @@ def main() -> None:
     print(f"[DAILY_BRIEF] headline={result['headline']}")
     print(f"[DAILY_BRIEF] one_liner={result['one_liner']}")
     print(f"[DAILY_BRIEF] citations={result['citations_count']} fallback={result['fallback_used']}")
+    print(
+        f"[DAILY_BRIEF] quality=new:{result['quality_score']} old:{result['existing_quality']} skipped={result['skipped_by_quality_guard']}"
+    )
     if result.get("write_error"):
         print(f"[DAILY_BRIEF] write_error={result['write_error']}")
 

@@ -234,3 +234,24 @@ def upsert_daily_brief(payload: dict[str, Any]) -> dict[str, Any]:
     )
     rows = response.data or []
     return rows[0] if rows else {}
+
+
+def fetch_latest_daily_brief_by_date(*, brief_date: str, prompt_version: str) -> dict[str, Any] | None:
+    """Fetch latest daily_brief row by (brief_date, prompt_version)."""
+    try:
+        response = (
+            _client.table(_DAILY_BRIEF_TABLE)
+            .select(
+                "id,brief_date,headline,one_liner,top_drivers,impacts,actions,citations,stats,prompt_version,generated_at"
+            )
+            .eq("brief_date", brief_date)
+            .eq("prompt_version", prompt_version)
+            .order("generated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[WARN] fetch_latest_daily_brief_by_date failed | error={exc}")
+        return None
