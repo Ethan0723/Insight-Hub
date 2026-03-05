@@ -57,6 +57,35 @@ def _truncate_for_prompt(value: Any, limit: int) -> str:
     return text[:limit].rstrip()
 
 
+def _topic_hint(input_news: list[dict[str, Any]]) -> str:
+    text = " ".join(
+        f"{str(item.get('title') or '')} {str(item.get('summary') or '')}".lower()
+        for item in (input_news or [])[:8]
+    )
+    topic_rules = [
+        ("tariff", "关税"),
+        ("tax", "税费"),
+        ("fraud", "欺诈"),
+        ("return", "退货"),
+        ("payment", "支付"),
+        ("checkout", "支付转化"),
+        ("logistics", "履约"),
+        ("shipping", "履约"),
+        ("ai agent", "AI代理"),
+        ("agent", "AI代理"),
+        ("ecommerce", "电商需求"),
+        ("import", "跨境进口"),
+    ]
+    topics = [zh for en, zh in topic_rules if en in text]
+    if not topics:
+        return "外部需求与支付链路"
+    dedup: list[str] = []
+    for t in topics:
+        if t not in dedup:
+            dedup.append(t)
+    return "、".join(dedup[:2])
+
+
 def _strip_disallowed_terms(text: str) -> str:
     cleaned = text or ""
     for term in _DISALLOWED_TERMS:
@@ -575,17 +604,9 @@ def _normalize_brief(
 
 def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: bool) -> dict[str, Any]:
     top = input_news[:3]
-    lead = top[0] if top else {}
-    lead_summary = _normalize_text(lead.get("summary"))
-    lead_title = _normalize_text(lead.get("title"))
-    seed = lead_summary or lead_title
-    if _is_english_heavy(seed) and not _has_cjk(seed):
-        seed = "关键外部变量波动"
-    seed = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", " ", seed).strip() or "关键外部变量波动"
-    if len(seed) > 16:
-        seed = seed[:16].rstrip()
-    headline = f"{seed}触发跨团队验证与策略预案"
-    one_liner = "当前高影响事件尚未收敛为单一主线，优先低成本试运行，并用转化、支付、履约指标验证方向。"
+    topic = _topic_hint(input_news)
+    headline = f"{topic}波动加剧，先做可逆验证与预案"
+    one_liner = f"当日信号主要集中在{topic}，先用低成本试点验证需求、支付与履约指标，再决定是否扩大投入。"
 
     return _normalize_brief(
         {
