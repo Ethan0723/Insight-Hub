@@ -78,11 +78,11 @@ def _is_english_heavy(text: str) -> bool:
     return latin >= 12 and cjk <= 8
 
 
-def _cn_or_fallback(text: str, fallback: str) -> str:
+def _cn_or_fallback(text: str, fallback: str, *, strict_cn: bool = False) -> str:
     cleaned = _strip_disallowed_terms(_normalize_text(text))
     if not cleaned:
         return fallback
-    if _is_english_heavy(cleaned) and not _has_cjk(cleaned):
+    if strict_cn and _is_english_heavy(cleaned) and not _has_cjk(cleaned):
         return fallback
     return cleaned
 
@@ -121,6 +121,13 @@ def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[
     cleaned = _strip_disallowed_terms(_normalize_text(headline))
     if not cleaned:
         return "外部信号分散，先执行可逆验证策略"
+    if cleaned.startswith("外部信号分散") and input_news:
+        seed = _normalize_text(input_news[0].get("title"))
+        if seed:
+            seed = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", " ", seed).strip()
+            if len(seed) > 16:
+                seed = seed[:16].rstrip()
+            return f"{seed}带来经营扰动，先做可逆验证"
     if not _headline_too_close_to_news(cleaned, input_news):
         return cleaned
 
@@ -432,6 +439,7 @@ def _normalize_brief(
     raw_headline = _cn_or_fallback(
         _normalize_text(raw.get("headline")),
         "外部信号分散，执行最小可逆策略并加密验证",
+        strict_cn=True,
     )
     one_liner = _strip_disallowed_terms(_normalize_text(raw.get("one_liner"))) or "外部冲击尚不集中，先以低成本动作验证需求、支付和履约关键指标。"
     headline = _rewrite_headline_if_needed(raw_headline, one_liner, input_news)
@@ -441,10 +449,13 @@ def _normalize_brief(
         for item in raw["top_drivers"][:3]:
             if not isinstance(item, dict):
                 continue
+            candidate_title = _normalize_text(item.get("title"))
+            if candidate_title.startswith("外部信号变化") and len(input_news) > len(top_drivers):
+                candidate_title = _normalize_text(input_news[len(top_drivers)].get("title"))
             top_drivers.append(
                 {
                     "title": _cn_or_fallback(
-                        _normalize_text(item.get("title")),
+                        candidate_title,
                         f"外部信号变化{len(top_drivers) + 1}",
                     ),
                     "why_it_matters": _cn_or_fallback(
@@ -459,7 +470,7 @@ def _normalize_brief(
         for item in input_news[:3]:
             top_drivers.append(
                 {
-                    "title": _cn_or_fallback(_normalize_text(item.get("title")), f"行业信号变化{len(top_drivers) + 1}"),
+                    "title": _cn_or_fallback(_normalize_text(item.get("title")), f"关键信号{len(top_drivers) + 1}"),
                     "why_it_matters": _cn_or_fallback(
                         _normalize_text(item.get("summary")),
                         "暂无集中冲击，先监测核心指标并执行最小可逆动作。",
