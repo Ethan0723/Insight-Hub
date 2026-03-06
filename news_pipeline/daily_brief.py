@@ -151,6 +151,9 @@ def _rewrite_headline_if_needed(headline: str, one_liner: str, input_news: list[
     cleaned = _strip_disallowed_terms(_normalize_text(headline))
     if not cleaned:
         return "外部信号分散，先执行可逆验证策略"
+    if cleaned.startswith("外部冲击尚不集中"):
+        topic = _topic_hint(input_news)
+        return f"{topic}波动加剧，优先执行可逆验证并保留策略机动"
     if _is_english_heavy(cleaned) and not _has_cjk(cleaned):
         base = _strip_disallowed_terms(_normalize_text(one_liner))
         if base:
