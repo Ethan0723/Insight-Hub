@@ -19,6 +19,7 @@ LLM_MAX_TOKENS = int(os.getenv("DAILY_BRIEF_MAX_TOKENS", os.getenv("LLM_MAX_TOKE
 LLM_TEMPERATURE = float(os.getenv("DAILY_BRIEF_TEMPERATURE", "0.2"))
 LLM_TIMEOUT = int(os.getenv("DAILY_BRIEF_TIMEOUT_SEC", "90"))
 QUALITY_GUARD_DELTA = int(os.getenv("DAILY_BRIEF_QUALITY_GUARD_DELTA", "5"))
+HIGH_IMPACT_THRESHOLD = int(os.getenv("DAILY_BRIEF_HIGH_IMPACT_THRESHOLD", "60"))  # >=60
 
 RISK_WEIGHT = {"高": 3, "中": 2, "低": 1}
 _DISALLOWED_TERMS = ("样本少", "无关业务", "需观察", "新闻不足", "单点风险")
@@ -581,7 +582,7 @@ def _normalize_brief(
 
     citations = _clean_citations(raw.get("citations"), input_news)
     high_risk = sum(1 for item in input_news if item.get("risk_level") == "高")
-    high_impact = sum(1 for item in input_news if int(item.get("impact_score") or 0) >= 75)
+    high_impact = sum(1 for item in input_news if int(item.get("impact_score") or 0) >= HIGH_IMPACT_THRESHOLD)
 
     stats_raw = raw.get("stats") if isinstance(raw.get("stats"), dict) else {}
     stats = {
