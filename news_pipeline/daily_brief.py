@@ -20,9 +20,20 @@ LLM_TEMPERATURE = float(os.getenv("DAILY_BRIEF_TEMPERATURE", "0.2"))
 LLM_TIMEOUT = int(os.getenv("DAILY_BRIEF_TIMEOUT_SEC", "90"))
 QUALITY_GUARD_DELTA = int(os.getenv("DAILY_BRIEF_QUALITY_GUARD_DELTA", "5"))
 HIGH_IMPACT_THRESHOLD = int(os.getenv("DAILY_BRIEF_HIGH_IMPACT_THRESHOLD", "60"))  # >=60
+GEN_RETRY_MAX = int(os.getenv("DAILY_BRIEF_RETRY_MAX", "3"))
+GEN_RETRY_TRIGGER_USED = int(os.getenv("DAILY_BRIEF_RETRY_TRIGGER_USED", "3"))
 
 RISK_WEIGHT = {"高": 3, "中": 2, "低": 1}
 _DISALLOWED_TERMS = ("样本少", "无关业务", "需观察", "新闻不足", "单点风险")
+_BLOCKED_HEADLINE_PREFIXES = (
+    "外部冲击尚不集中",
+    "外部信号分散",
+    "外部信号未成单一主线",
+)
+_BLOCKED_ONE_LINER_PREFIXES = (
+    "外部冲击尚不集中",
+    "当前高影响事件尚未收敛",
+)
 
 
 def _utc8_window(now_utc: datetime | None = None) -> tuple[str, datetime, datetime]:
@@ -262,6 +273,25 @@ def _quality_score(brief_payload: dict[str, Any], input_news: list[dict[str, Any
 
     final_score = max(0, min(100, round(signal_score + evidence_score + action_score + text_score - penalty)))
     return int(final_score)
+
+
+def _is_generic_payload(brief_payload: dict[str, Any], input_news: list[dict[str, Any]]) -> bool:
+    if len(input_news) < GEN_RETRY_TRIGGER_USED:
+        return False
+    headline = _normalize_text(brief_payload.get("headline"))
+    one_liner = _normalize_text(brief_payload.get("one_liner"))
+    return headline.startswith(_BLOCKED_HEADLINE_PREFIXES) or one_liner.startswith(_BLOCKED_ONE_LINER_PREFIXES)
+
+
+def _force_topic_rewrite(brief_payload: dict[str, Any], input_news: list[dict[str, Any]]) -> dict[str, Any]:
+    topic = _topic_hint(input_news)
+    rewritten = dict(brief_payload)
+    rewritten["headline"] = f"{topic}波动加剧，优先执行可逆验证并保留策略机动"
+    rewritten["one_liner"] = (
+        f"当日信号集中于{topic}，请先用小范围动作验证需求、支付与履约关键指标，"
+        "再按验证结果决定是否扩大投入。"
+    )
+    return rewritten
 
 
 def _extract_existing_quality(existing_row: dict[str, Any]) -> int:
@@ -642,33 +672,47 @@ def generate_daily_brief() -> dict[str, Any]:
     )
     input_news = _build_input_news(raw_rows)
     low_sample = len(input_news) < 5
-    style = _style_choice(now_utc)
-
-    prompt = _build_prompt(input_news=input_news, style=style, low_sample=low_sample)
     llm_resp: dict[str, Any] = {}
     brief_payload: dict[str, Any]
     fallback_used = False
 
     try:
-        llm_resp = generate_json_object(
-            prompt,
-            max_tokens=LLM_MAX_TOKENS,
-            temperature=LLM_TEMPERATURE,
-            timeout=LLM_TIMEOUT,
-        )
-        if not llm_resp.get("ok"):
-            raise ValueError("LLM JSON parse failed")
-        brief_payload = _normalize_brief(
-            llm_resp.get("data") if isinstance(llm_resp.get("data"), dict) else {},
-            input_news=input_news,
-            scanned=len(raw_rows),
-            low_sample=low_sample,
-        )
+        last_error = "unknown"
+        for attempt in range(1, max(1, GEN_RETRY_MAX) + 1):
+            style = _style_choice(now_utc + timedelta(hours=attempt - 1))
+            prompt = _build_prompt(input_news=input_news, style=style, low_sample=low_sample)
+            llm_resp = generate_json_object(
+                prompt,
+                max_tokens=LLM_MAX_TOKENS,
+                temperature=LLM_TEMPERATURE,
+                timeout=LLM_TIMEOUT,
+            )
+            if not llm_resp.get("ok"):
+                last_error = "LLM JSON parse failed"
+                continue
+            candidate = _normalize_brief(
+                llm_resp.get("data") if isinstance(llm_resp.get("data"), dict) else {},
+                input_news=input_news,
+                scanned=len(raw_rows),
+                low_sample=low_sample,
+            )
+            if _is_generic_payload(candidate, input_news):
+                last_error = "generic_payload_blocked"
+                print(f"[DAILY_BRIEF][WARN] blocked generic payload | attempt={attempt}")
+                continue
+            brief_payload = candidate
+            break
+        else:
+            raise ValueError(last_error)
     except Exception as exc:
         fallback_used = True
         raw_preview = _truncate_for_prompt(llm_resp.get("raw_text") if isinstance(llm_resp, dict) else "", 400)
         print(f"[DAILY_BRIEF][WARN] fallback used | reason={exc} | raw_preview={raw_preview}")
         brief_payload = _fallback_brief(input_news, scanned=len(raw_rows), low_sample=low_sample)
+
+    if _is_generic_payload(brief_payload, input_news):
+        brief_payload = _force_topic_rewrite(brief_payload, input_news)
+        print("[DAILY_BRIEF][WARN] force topic rewrite applied")
 
     row = {
         "brief_date": brief_date,
