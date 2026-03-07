@@ -41,12 +41,16 @@ pip install -r requirements.txt
 python -m news_pipeline.main
 ```
 
-## 后续计划
+## 生产运行方式（当前）
 
-未来通过 GitHub Actions 定时运行该模块，实现：
-1. 定时抓取 RSS
-2. 调用 LLM 生成结构化摘要
-3. 写入 Supabase 供前端消费
+当前生产环境使用服务器 `systemd` 定时，而非 GitHub cron：
+1. `insight-news-pipeline.timer` 每 6 小时触发（UTC+8 的 00/06/12/18 点）
+2. `insight-news-pipeline.service` 串行执行：
+   - `python -m news_pipeline.main`
+   - `python -m news_pipeline.daily_brief`
+3. 通过同一服务内 `main && daily_brief` 保证依赖顺序：先写 `news_raw`，再生成 `daily_brief`
+
+GitHub Actions 仅保留手动补跑入口（`workflow_dispatch`）。
 
 ## 清理历史脏数据
 

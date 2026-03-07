@@ -7,6 +7,7 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 定时生成公司级决策简报（`daily_brief`）
 - 前端优先展示 `daily_brief`，缺失时回退规则版
 - 提供 AI 助手问答（`ai_chat_v2`：Hybrid 检索 + LLM 决策生成）、证据追溯、收入影响沙盘
+- 生成质量防护：低质量模板句拦截、重试与主题强制改写（避免“空泛结论”覆盖有效结论）
 
 ---
 
@@ -31,6 +32,11 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 前端优先读取 `daily_brief`（UTC+8 当日）
 - 若 `daily_brief` 不可用，自动回退到规则版（不阻断页面）
 - 展示结构：结论、驱动、SaaS影响拆解、优先行动、证据
+- 生成侧质量控制：
+  - 模板句拦截（命中新闻充足时禁止写入“外部冲击尚不集中/外部信号分散”等泛化句）
+  - 多次重试（默认最多 3 次，切换写作风格后重生）
+  - 仍命中模板时，按当日主题强制改写 headline/one_liner
+  - 同日质量守卫（低质量结果不会覆盖明显更高质量结果）
 
 ### 2.2 新闻管道（news pipeline）
 - RSS/网页抓取 -> LLM结构化摘要 -> Supabase 写入 `news_raw`
@@ -270,6 +276,10 @@ python -m news_pipeline.daily_brief
 - `DAILY_BRIEF_MAX_TOKENS`
 - `DAILY_BRIEF_PROMPT_VERSION`
 - `DAILY_BRIEF_MAX_NEWS`
+- `DAILY_BRIEF_HIGH_IMPACT_THRESHOLD`（默认 `60`，统计口径：`impact_score >= 60`）
+- `DAILY_BRIEF_RETRY_MAX`（默认 `3`，生成重试次数）
+- `DAILY_BRIEF_RETRY_TRIGGER_USED`（默认 `3`，命中新闻达到阈值时启用反模板强拦截）
+- `DAILY_BRIEF_QUALITY_GUARD_DELTA`（默认 `5`，同日覆盖质量差阈值）
 
 ---
 
@@ -288,6 +298,11 @@ python -m news_pipeline.daily_brief
 - `daily_brief.citations` + `top_drivers.signals`
 - 前端展示支持链接跳转，保证可追溯
 
+### 9.4 high_impact 统计口径
+- `high_impact` 统计规则：`impact_score >= DAILY_BRIEF_HIGH_IMPACT_THRESHOLD`
+- 当前默认阈值为 `60`（即 `>=60`）
+- 说明：如果当天是 `72/72/65/55`，则 `high_impact = 3`
+
 ---
 
 ## 10. 已知行为与排查
@@ -296,6 +311,14 @@ python -m news_pipeline.daily_brief
 - 新闻库读的是 `news_raw`（准实时）
 - 战略判断读的是 `daily_brief`（批处理快照）
 - 当前生产调度每 6 小时一次，通常会有“分钟级~6小时”更新延迟
+
+### 10.5 为什么会出现“明明有新闻但结论太泛”？
+- 这通常是 LLM 输出质量波动，不是“未命中新闻”
+- 当前已加反模板保护：
+  - 命中新闻充足时拦截泛化句式
+  - 自动重试并切换风格
+  - 必要时按当日主题强制改写后再写入
+- 如仍异常，可手动执行 `python -m news_pipeline.daily_brief` 立即重生当天结论
 
 ### 10.2 为什么会出现平台误归类（例如提到 Shopify 但主体不是 Shopify）？
 - 平台识别基于标题/来源规则，已加入 WooCommerce-迁移语义修正
@@ -358,3 +381,5 @@ journalctl -u insight-news-pipeline.service -n 100 --no-pager
 - 示例问题与快捷问题统一走同一 LLM+检索链路
 - 英文标题/驱动增加中文兜底
 - 平台归类规则修复（WooCommerce/Shopify 场景）
+- `daily_brief` 增加反模板拦截 + 重试 + 主题强制改写，减少空泛结论
+- `high_impact` 口径更新为 `impact_score >= 60`
