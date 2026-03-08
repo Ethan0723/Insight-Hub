@@ -71,13 +71,16 @@ function buildPriorityActions(brief) {
   });
 }
 
-function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
+function StrategicOverview({
+  strategyBrief,
+  indexes,
+  selectedDate,
+  onSelectedDateChange,
+  availableNewsIds = [],
+  onOpenEvidence
+}) {
   const [metricsOpen, setMetricsOpen] = useState(true);
   const [citationsOpen, setCitationsOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
-    return now.toISOString().slice(0, 10);
-  });
   const [selectedBrief, setSelectedBrief] = useState(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefHint, setBriefHint] = useState("");
@@ -133,6 +136,14 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
   const impactGrid = useMemo(() => buildImpactGrid(brief), [brief]);
   const actions = useMemo(() => buildPriorityActions(brief), [brief]);
   const citations = useMemo(() => (Array.isArray(brief?.citations) ? brief.citations : []), [brief]);
+  const availableNewsIdSet = useMemo(() => new Set(availableNewsIds), [availableNewsIds]);
+  const evidenceNewsIds = useMemo(() => {
+    const citationIds = citations
+      .map((item) => String(item?.id || "").trim())
+      .filter((id) => id && availableNewsIdSet.has(id));
+    if (citationIds.length > 0) return citationIds;
+    return availableNewsIds;
+  }, [citations, availableNewsIds, availableNewsIdSet]);
 
   const coverageText = `数据覆盖：${brief?.meta?.news_count_scanned || 0} | 命中：${brief?.meta?.news_count_used || 0} | 高影响：${brief?.meta?.high_impact || 0}`;
 
@@ -161,14 +172,14 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
                 id="brief-date"
                 type="date"
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(String(e.target.value || "").slice(0, 10))}
+                onChange={(e) => onSelectedDateChange(String(e.target.value || "").slice(0, 10))}
                 className="rounded-md border border-slate-700 bg-slate-900/85 px-1.5 py-0.5 text-[10px] text-slate-200 outline-none focus:border-cyan-300/50"
               />
               <button
                 type="button"
                 onClick={() => {
                   const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
-                  setSelectedDate(now.toISOString().slice(0, 10));
+                  onSelectedDateChange(now.toISOString().slice(0, 10));
                 }}
                 className="rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
               >
@@ -192,7 +203,7 @@ function StrategicOverview({ strategyBrief, indexes, onOpenEvidence }) {
             onClick={() =>
               onOpenEvidence({
                 title: "战略证据",
-                newsIds: (indexes || []).flatMap((i) => i?.evidence?.newsIds || []),
+                newsIds: evidenceNewsIds,
                 source: "daily_brief"
               })
             }

@@ -24,6 +24,8 @@ function utc8TodayKey() {
 
 function DashboardPage({
   insight,
+  selectedBriefDate,
+  onSelectedBriefDateChange,
   matrix,
   explainers,
   revenueResult,
@@ -39,18 +41,29 @@ function DashboardPage({
   onOpenEvidence,
   onOpenLibraryByIds
 }) {
+  const effectiveDate = String(selectedBriefDate || '').slice(0, 10) || utc8TodayKey();
+
+  const selectedDateNews = useMemo(() => {
+    return news.filter((item) => toUtc8DayKey(item.createdAt || item.publishDate) === effectiveDate);
+  }, [news, effectiveDate]);
+
   const feedNews = useMemo(() => {
-    const today = utc8TodayKey();
-    const todayNews = news.filter((item) => toUtc8DayKey(item.createdAt) === today);
-    return [...todayNews]
+    return [...selectedDateNews]
       .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
       .slice(0, 8);
-  }, [news]);
+  }, [selectedDateNews]);
 
   return (
     <>
       <div id="overview" className="scroll-mt-24">
-        <StrategicOverview strategyBrief={insight.strategyBrief} indexes={insight.indexes} onOpenEvidence={onOpenEvidence} />
+        <StrategicOverview
+          strategyBrief={insight.strategyBrief}
+          indexes={insight.indexes}
+          selectedDate={effectiveDate}
+          onSelectedDateChange={onSelectedBriefDateChange}
+          availableNewsIds={selectedDateNews.map((item) => item.id)}
+          onOpenEvidence={onOpenEvidence}
+        />
       </div>
 
       <div id="revenue" className="scroll-mt-24">

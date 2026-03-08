@@ -16,6 +16,10 @@ const defaultScenario = {
 };
 
 function App() {
+  const [selectedBriefDate, setSelectedBriefDate] = useState(() => {
+    const utc8Now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    return utc8Now.toISOString().slice(0, 10);
+  });
   const [activeNav, setActiveNav] = useState('overview');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
@@ -314,6 +318,8 @@ function App() {
         ) : (
           <DashboardPage
             insight={insight}
+            selectedBriefDate={selectedBriefDate}
+            onSelectedBriefDateChange={setSelectedBriefDate}
             matrix={matrix}
             explainers={meta.explainers}
             revenueResult={revenueResult}
