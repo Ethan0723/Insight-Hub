@@ -973,7 +973,7 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
 
     return {
       name: platform,
-      weeklyMove: pickChineseText([first?.title, first?.aiTldr], fallback),
+      weeklyMove: pickChineseText([first?.aiTldr, first?.summary, first?.title], fallback),
       productUpdate: pickChineseText(
         [
           rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.summary,
