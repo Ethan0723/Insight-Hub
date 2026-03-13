@@ -959,6 +959,7 @@ function buildDailyInsight(news: NewsItem[]): DailyInsight {
 function buildMatrix(news: NewsItem[]): MatrixRow[] {
   if (news.length === 0) return mockMatrix;
   const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
+  const normalize = (text: string) => String(text || '').replace(/\s+/g, '').trim();
 
   return targetPlatforms.map((platform) => {
     const rows = news
@@ -970,18 +971,40 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
     const first = rows[0];
     const fallback = `暂无 ${platform} 最新事件，建议继续追踪。`;
     const evidenceIds = rows.map((item) => item.id);
+    const usedRowIds = new Set<string>();
+    const usedTexts = new Set<string>();
+
+    const weeklyMove = pickChineseText([first?.aiTldr, first?.summary, first?.title], fallback);
+    if (first?.id) usedRowIds.add(first.id);
+    usedTexts.add(normalize(weeklyMove));
+
+    const productRow = rows.find((n) => {
+      if (usedRowIds.has(n.id)) return false;
+      if (!(n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))) return false;
+      const candidate = pickChineseText([n.summary, n.aiTldr, n.title], '');
+      return Boolean(candidate) && !usedTexts.has(normalize(candidate));
+    });
+    const productUpdate = productRow
+      ? pickChineseText([productRow.summary, productRow.aiTldr, productRow.title], '暂无显著产品更新')
+      : '暂无显著产品更新';
+    if (productRow?.id) usedRowIds.add(productRow.id);
+    usedTexts.add(normalize(productUpdate));
+
+    const aiRow = rows.find((n) => {
+      if (usedRowIds.has(n.id)) return false;
+      if (!n.moduleTags.includes('AI')) return false;
+      const candidate = pickChineseText([n.aiTldr, n.summary, n.title], '');
+      return Boolean(candidate) && !usedTexts.has(normalize(candidate));
+    });
+    const aiUpdate = aiRow
+      ? pickChineseText([aiRow.aiTldr, aiRow.summary, aiRow.title], '暂无明确 AI 动态')
+      : '暂无明确 AI 动态';
 
     return {
       name: platform,
-      weeklyMove: pickChineseText([first?.aiTldr, first?.summary, first?.title], fallback),
-      productUpdate: pickChineseText(
-        [
-          rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.summary,
-          rows.find((n) => n.moduleTags.includes('平台') || n.moduleTags.includes('物流'))?.aiTldr
-        ],
-        '暂无显著产品更新'
-      ),
-      aiUpdate: pickChineseText([rows.find((n) => n.moduleTags.includes('AI'))?.aiTldr], '暂无明确 AI 动态'),
+      weeklyMove,
+      productUpdate,
+      aiUpdate,
       evidence: {
         id: `ev-m-${platform.toLowerCase().replace(/\s+/g, '-')}`,
         title: `${platform} 竞争引用`,
