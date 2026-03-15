@@ -1073,12 +1073,13 @@ async function handleNewsRaw(req, res) {
   const requestUrl = new URL(req.url || '/api/news_raw', `http://${req.headers.host || 'localhost'}`);
   const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 1000;
+  const lite = String(requestUrl.searchParams.get('lite') || '') === '1';
 
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
-  upstreamUrl.searchParams.set(
-    'select',
-    'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
-  );
+  const select = lite
+    ? 'id,title,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
+    : 'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at';
+  upstreamUrl.searchParams.set('select', select);
   upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   upstreamUrl.searchParams.set('limit', String(limit));
 
