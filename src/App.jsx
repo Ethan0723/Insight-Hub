@@ -8,11 +8,25 @@ import NewsLibraryPage from './pages/NewsLibraryPage';
 import { api } from './services/api';
 import { storage } from './services/storage';
 import { track, trackPageView, trackSectionView } from './lib/analytics';
+import { mockDailyInsight, mockMatrix, mockModelExplainers } from './data/mock/dashboard';
+import { calculateRevenueImpact } from './data/mock/revenue';
 
 const defaultScenario = {
   arpuDelta: 0,
   commissionDelta: 0,
   paymentSuccessDelta: 0
+};
+
+const defaultScoreBreakdown = {
+  baseline: { subscription: 50, commission: 50, payment: 50, ecosystem: 50, overall: 50 },
+  delta: { subscription: 0, commission: 0, payment: 0, ecosystem: 0, overall: 0 },
+  final: { subscription: 50, commission: 50, payment: 50, ecosystem: 50, overall: 50 },
+  explain: {
+    baselineMethod: 'Baseline：外部态势（新闻驱动，leading indicator）。',
+    deltaMethod: 'Δ：策略参数变化（沙盘仿真，what-if）。',
+    notes: ['Final = clamp(Baseline + Δ, 0..100)', 'Final 用于策略优先级决策。']
+  },
+  evidence: { subscription: [], commission: [], payment: [], ecosystem: [] }
 };
 
 function App() {
@@ -23,17 +37,20 @@ function App() {
   const [activeNav, setActiveNav] = useState('overview');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const [newsBase, setNewsBase] = useState([]);
-  const [insight, setInsight] = useState(null);
-  const [matrix, setMatrix] = useState([]);
-  const [meta, setMeta] = useState({ assistant: { samples: [], response: { affectedModules: [], strategy: [] } }, explainers: [] });
+  const [insight, setInsight] = useState(mockDailyInsight);
+  const [matrix, setMatrix] = useState(mockMatrix);
+  const [meta, setMeta] = useState({
+    assistant: { samples: [], response: { affectedModules: [], strategy: [] } },
+    explainers: mockModelExplainers
+  });
 
   const [scenario, setScenario] = useState(defaultScenario);
-  const [revenueResult, setRevenueResult] = useState(null);
-  const [scoreBreakdown, setScoreBreakdown] = useState(null);
+  const [revenueResult, setRevenueResult] = useState(calculateRevenueImpact(defaultScenario));
+  const [scoreBreakdown, setScoreBreakdown] = useState(defaultScoreBreakdown);
 
   const [favorites, setFavorites] = useState(storage.getFavorites());
   const [readIds, setReadIds] = useState(storage.getReadNewsIds());
@@ -78,7 +95,7 @@ function App() {
         setScoreBreakdown(scoreRes);
       })
       .catch(() => {
-        if (mounted) setError('初始化数据失败，请刷新重试。');
+        if (mounted) setError('网络较慢，已先展示默认视图，数据会自动刷新。');
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -272,22 +289,7 @@ function App() {
     setScenario((prev) => ({ ...prev, ...patch }));
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="mx-auto max-w-[1400px] px-4 py-20 lg:px-8">
-          <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-800" />
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, idx) => (
-              <div key={idx} className="h-40 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !insight || !revenueResult || !scoreBreakdown) {
+  if (!insight || !revenueResult || !scoreBreakdown) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
@@ -302,6 +304,12 @@ function App() {
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
 
       <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={onToggleAIPanel} />
+
+      {error ? (
+        <div className="mx-auto mt-4 max-w-[1400px] px-4 lg:px-8">
+          <div className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs text-amber-200">{error}</div>
+        </div>
+      ) : null}
 
 
       <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 lg:px-8">
