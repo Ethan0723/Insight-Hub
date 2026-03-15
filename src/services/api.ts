@@ -1314,7 +1314,7 @@ export const api = {
 
     // First load daily_brief directly, do not block on news_raw latency.
     const brief = await getDailyBriefFromData([]);
-    const news = await newsPromise;
+    const news = await Promise.race([newsPromise, delay(1800).then(() => [])]);
     const fallback = news.length > 0 ? buildDailyInsight(news) : mockDailyInsight;
     if (!brief) return fallback;
     return {
