@@ -14,6 +14,28 @@ const defaultScenario = {
   commissionDelta: 0,
   paymentSuccessDelta: 0
 };
+const CORE_SNAPSHOT_KEY = 'sse:core-snapshot:v1';
+
+function readCoreSnapshot() {
+  try {
+    const raw = localStorage.getItem(CORE_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!Array.isArray(parsed.newsBase) || !parsed.insight || !Array.isArray(parsed.matrix)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCoreSnapshot(payload) {
+  try {
+    localStorage.setItem(CORE_SNAPSHOT_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore cache write failures
+  }
+}
 
 function App() {
   const [selectedBriefDate, setSelectedBriefDate] = useState(() => {
@@ -60,43 +82,65 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
+    let retryTimer = null;
     const withTimeout = (promise, ms = 15000) =>
       Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
       ]);
+    const cached = readCoreSnapshot();
+    if (cached) {
+      setNewsBase(cached.newsBase || []);
+      setInsight(cached.insight || null);
+      setMatrix(cached.matrix || []);
+      if (cached.meta) setMeta(cached.meta);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
 
-    setLoading(true);
     setError('');
 
-    Promise.allSettled([
-      withTimeout(api.getNews({ page: 1, pageSize: 200 }), 15000),
-      withTimeout(api.getDailyInsight(), 15000),
-      withTimeout(api.getMatrix(), 15000),
-      withTimeout(api.getAppMeta(), 15000)
-    ])
-      .then((results) => {
-        if (!mounted) return;
-        const [newsRes, insightRes, matrixRes, metaRes] = results;
+    const loadCore = () => {
+      Promise.allSettled([
+        withTimeout(api.getNews({ page: 1, pageSize: 200 }), 15000),
+        withTimeout(api.getDailyInsight(), 15000),
+        withTimeout(api.getMatrix(), 15000),
+        withTimeout(api.getAppMeta(), 15000)
+      ])
+        .then((results) => {
+          if (!mounted) return;
+          const [newsRes, insightRes, matrixRes, metaRes] = results;
 
-        const coreOk =
-          newsRes.status === 'fulfilled' &&
-          insightRes.status === 'fulfilled' &&
-          matrixRes.status === 'fulfilled';
+          const coreOk =
+            newsRes.status === 'fulfilled' &&
+            insightRes.status === 'fulfilled' &&
+            matrixRes.status === 'fulfilled';
 
-        if (!coreOk) {
-          setError('首页核心数据加载失败，请刷新重试。');
-          return;
-        }
+          if (!coreOk) {
+            setError(cached ? '网络波动，正在自动重试刷新数据…' : '首页核心数据加载失败，正在自动重试…');
+            retryTimer = window.setTimeout(loadCore, 3000);
+            return;
+          }
 
-        setNewsBase(newsRes.value.list);
-        setInsight(insightRes.value);
-        setMatrix(matrixRes.value);
-        if (metaRes.status === 'fulfilled') setMeta(metaRes.value);
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
+          setError('');
+          setNewsBase(newsRes.value.list);
+          setInsight(insightRes.value);
+          setMatrix(matrixRes.value);
+          if (metaRes.status === 'fulfilled') setMeta(metaRes.value);
+          writeCoreSnapshot({
+            newsBase: newsRes.value.list,
+            insight: insightRes.value,
+            matrix: matrixRes.value,
+            meta: metaRes.status === 'fulfilled' ? metaRes.value : meta
+          });
+        })
+        .finally(() => {
+          if (mounted) setLoading(false);
+        });
+    };
+
+    loadCore();
 
     Promise.allSettled([
       withTimeout(api.getRevenueImpact(defaultScenario), 20000),
@@ -110,6 +154,7 @@ function App() {
 
     return () => {
       mounted = false;
+      if (retryTimer) window.clearTimeout(retryTimer);
     };
   }, []);
 
