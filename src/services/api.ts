@@ -25,7 +25,7 @@ const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 200);
 const LIBRARY_FETCH_LIMIT = Number(import.meta.env.VITE_LIBRARY_FETCH_LIMIT || 1000);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
-const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000);
+const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 45000);
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
 let cachePending: Promise<NewsItem[]> | null = null;

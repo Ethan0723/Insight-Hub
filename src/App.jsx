@@ -59,22 +59,17 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
-    const withTimeout = (promise, ms = 15000) =>
-      Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
-      ]);
 
     setLoading(true);
     setError('');
 
     Promise.all([
-      withTimeout(api.getNews({ page: 1, pageSize: 200 })),
-      withTimeout(api.getDailyInsight()),
-      withTimeout(api.getMatrix()),
-      withTimeout(api.getAppMeta()),
-      withTimeout(api.getRevenueImpact(defaultScenario)),
-      withTimeout(api.getScoreBreakdown(defaultScenario))
+      api.getNews({ page: 1, pageSize: 200 }),
+      api.getDailyInsight(),
+      api.getMatrix(),
+      api.getAppMeta(),
+      api.getRevenueImpact(defaultScenario),
+      api.getScoreBreakdown(defaultScenario)
     ])
       .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes, scoreRes]) => {
         if (!mounted) return;
