@@ -12,8 +12,8 @@ function NewsLibraryPage({
   onOpenEvidence,
   indexMap
 }) {
-  const HIGH_PAGE_SIZE = 9;
-  const LOW_PAGE_SIZE = 9;
+  const HIGH_PAGE_SIZE = 6;
+  const LOW_PAGE_SIZE = 6;
   const INITIAL_BATCH = 60;
   const NEXT_BATCH = 20;
   const [query, setQuery] = useState({
