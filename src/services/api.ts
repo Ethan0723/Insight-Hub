@@ -362,6 +362,69 @@ function hasSupabaseConfig(): boolean {
   return Boolean(USE_SUPABASE && SUPABASE_URL && SUPABASE_ANON_KEY);
 }
 
+async function fetchNewsRawPage(params: {
+  offset: number;
+  limit: number;
+  dateFrom?: string;
+  dateTo?: string;
+  includeTotal?: boolean;
+  lite?: boolean;
+}): Promise<{ rows: any[]; total: number }> {
+  const { offset, limit, dateFrom, dateTo, includeTotal = false, lite = false } = params;
+
+  if (hasSupabaseConfig()) {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
+    const select = lite
+      ? 'id,title,title_zh:summary->>title_zh,tldr:summary->>tldr,core_summary:summary->>core_summary,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
+      : 'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at';
+    url.searchParams.set('select', select);
+    url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
+    url.searchParams.set('offset', String(Math.max(0, offset)));
+    url.searchParams.set('limit', String(Math.max(1, Math.min(1000, limit))));
+    if (dateFrom) url.searchParams.set('publish_time', `gte.${dateFrom}T00:00:00+08:00`);
+    if (dateTo) url.searchParams.set('publish_time', `lte.${dateTo}T23:59:59+08:00`);
+
+    const headers: Record<string, string> = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    };
+    if (includeTotal) headers.Prefer = 'count=exact';
+
+    const res = await fetchWithTimeout(url.toString(), { headers });
+    if (!res.ok) throw new Error(`supabase page http ${res.status}`);
+    const rows = await res.json();
+    const list = Array.isArray(rows) ? rows : [];
+    if (!includeTotal) return { rows: list, total: list.length };
+
+    let total = list.length;
+    const contentRange = res.headers.get('content-range') || '';
+    const slash = contentRange.lastIndexOf('/');
+    if (slash >= 0) {
+      const raw = Number.parseInt(contentRange.slice(slash + 1), 10);
+      if (Number.isFinite(raw)) total = raw;
+    }
+    return { rows: list, total };
+  }
+
+  const params2 = new URLSearchParams();
+  params2.set('offset', String(Math.max(0, offset)));
+  params2.set('limit', String(Math.max(1, Math.min(1000, limit))));
+  if (lite) params2.set('lite', '1');
+  if (includeTotal) params2.set('include_total', '1');
+  if (dateFrom) params2.set('date_from', dateFrom);
+  if (dateTo) params2.set('date_to', dateTo);
+  const res = await fetchWithTimeout(`/api/news_raw?${params2.toString()}`);
+  if (!res.ok) throw new Error(`proxy page http ${res.status}`);
+  const body = await res.json();
+  if (includeTotal && body && typeof body === 'object') {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    const total = Number.isFinite(Number(body.total)) ? Number(body.total) : rows.length;
+    return { rows, total };
+  }
+  const rows = Array.isArray(body) ? body : [];
+  return { rows, total: rows.length };
+}
+
 function toUtc8WindowLabel(dayKey: string): string {
   return `${dayKey} (UTC+8)`;
 }
@@ -1287,5 +1350,31 @@ export const api = {
       assistant: mockAssistant,
       explainers: mockModelExplainers
     };
+  },
+
+  async getNewsTotal(dateFrom?: string, dateTo?: string): Promise<number> {
+    await delay(60);
+    const { total } = await fetchNewsRawPage({
+      offset: 0,
+      limit: 1,
+      dateFrom,
+      dateTo,
+      includeTotal: true,
+      lite: true
+    });
+    return total;
+  },
+
+  async getNewsBatch(params: { offset: number; limit: number; dateFrom?: string; dateTo?: string }): Promise<NewsItem[]> {
+    await delay(80);
+    const { rows } = await fetchNewsRawPage({
+      offset: params.offset,
+      limit: params.limit,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      includeTotal: false,
+      lite: false
+    });
+    return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
   }
 };

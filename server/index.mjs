@@ -1073,7 +1073,10 @@ async function handleNewsRaw(req, res) {
   const requestUrl = new URL(req.url || '/api/news_raw', `http://${req.headers.host || 'localhost'}`);
   const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 1000;
+  const rawOffset = Number.parseInt(String(requestUrl.searchParams.get('offset') || ''), 10);
+  const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
   const lite = String(requestUrl.searchParams.get('lite') || '') === '1';
+  const includeTotal = String(requestUrl.searchParams.get('include_total') || '') === '1';
   const recentDays = Number.parseInt(String(requestUrl.searchParams.get('recent_days') || ''), 10);
   const dateFrom = String(requestUrl.searchParams.get('date_from') || '').trim();
   const dateTo = String(requestUrl.searchParams.get('date_to') || '').trim();
@@ -1094,13 +1097,15 @@ async function handleNewsRaw(req, res) {
   }
   upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   upstreamUrl.searchParams.set('limit', String(limit));
+  upstreamUrl.searchParams.set('offset', String(offset));
 
-  const upstream = await fetch(upstreamUrl.toString(), {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
-    }
-  });
+  const headers = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+  };
+  if (includeTotal) headers.Prefer = 'count=exact';
+
+  const upstream = await fetch(upstreamUrl.toString(), { headers });
 
   const text = await upstream.text();
   if (!upstream.ok) {
@@ -1108,8 +1113,29 @@ async function handleNewsRaw(req, res) {
     return;
   }
 
-  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(text);
+  if (!includeTotal) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(text);
+    return;
+  }
+
+  let rows = [];
+  try {
+    const parsed = JSON.parse(text);
+    rows = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    rows = [];
+  }
+
+  let total = rows.length;
+  const contentRange = upstream.headers.get('content-range') || '';
+  const slash = contentRange.lastIndexOf('/');
+  if (slash >= 0) {
+    const rawTotalNum = Number.parseInt(contentRange.slice(slash + 1), 10);
+    if (Number.isFinite(rawTotalNum)) total = rawTotalNum;
+  }
+
+  sendJson(res, 200, { total, rows });
 }
 
 async function handleDailyBrief(req, res, requestUrl) {

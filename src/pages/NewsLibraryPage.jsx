@@ -14,6 +14,8 @@ function NewsLibraryPage({
 }) {
   const HIGH_PAGE_SIZE = 9;
   const LOW_PAGE_SIZE = 9;
+  const INITIAL_BATCH = 100;
+  const NEXT_BATCH = 20;
   const [query, setQuery] = useState({
     sortBy: 'time',
     platforms: [],
@@ -26,6 +28,10 @@ function NewsLibraryPage({
     dateTo: '',
     ids: []
   });
+  const [loadedNews, setLoadedNews] = useState([]);
+  const [dbTotal, setDbTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [highImpactAll, setHighImpactAll] = useState([]);
   const [lowImpactAll, setLowImpactAll] = useState([]);
   const [highPage, setHighPage] = useState(1);
@@ -44,33 +50,95 @@ function NewsLibraryPage({
     setLowPage(1);
   }, [initialQuery]);
 
+  const applyLocalFilters = (list) => {
+    let result = [...list];
+    if (query.ids && query.ids.length > 0) {
+      const set = new Set(query.ids);
+      result = result.filter((item) => set.has(item.id));
+    }
+    if (query.platforms && query.platforms.length > 0) {
+      result = result.filter((item) => query.platforms.includes(item.platform));
+    }
+    if (query.regions && query.regions.length > 0) {
+      result = result.filter((item) => query.regions.includes(item.region));
+    }
+    if (query.moduleTags && query.moduleTags.length > 0) {
+      result = result.filter((item) => query.moduleTags.some((tag) => item.moduleTags.includes(tag)));
+    }
+    if (query.riskLevels && query.riskLevels.length > 0) {
+      result = result.filter((item) => query.riskLevels.includes(item.riskLevel));
+    }
+    if (query.impactDimensions && query.impactDimensions.length > 0) {
+      result = result.filter((item) => query.impactDimensions.some((dim) => item.impactDimensions.includes(dim)));
+    }
+    if (query.dateFrom) {
+      const from = new Date(query.dateFrom).getTime();
+      result = result.filter((item) => new Date(item.publishDate).getTime() >= from);
+    }
+    if (query.dateTo) {
+      const to = new Date(query.dateTo).getTime();
+      result = result.filter((item) => new Date(item.publishDate).getTime() <= to);
+    }
+    if (query.keyword?.trim()) {
+      const key = query.keyword.trim().toLowerCase();
+      result = result.filter(
+        (item) =>
+          item.title.toLowerCase().includes(key) ||
+          item.summary.toLowerCase().includes(key) ||
+          item.entities.join(' ').toLowerCase().includes(key)
+      );
+    }
+
+    result.sort((a, b) => {
+      if (query.sortBy === 'impact') return b.impactScore - a.impactScore;
+      if (query.sortBy === 'risk') {
+        const rank = { 高: 3, 中: 2, 低: 1 };
+        return (rank[b.riskLevel] || 1) - (rank[a.riskLevel] || 1);
+      }
+      return new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime();
+    });
+    return result;
+  };
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
     setError('');
+    setHasMore(true);
+    setLoadedNews([]);
+    setHighPage(1);
+    setLowPage(1);
 
-    api
-      .searchNews({ ...query, page: 1, pageSize: 5000 })
-      .then((fullRes) => {
+    Promise.all([
+      api.getNewsTotal(query.dateFrom, query.dateTo),
+      api.getNewsBatch({
+        offset: 0,
+        limit: INITIAL_BATCH,
+        dateFrom: query.dateFrom || undefined,
+        dateTo: query.dateTo || undefined
+      })
+    ])
+      .then(([total, batch]) => {
         if (!mounted) return;
-        const highAll = fullRes.list.filter((item) => item.impactScore > 20);
-        const lowAll = fullRes.list.filter((item) => item.impactScore <= 20);
+        setDbTotal(total);
+        setHasMore(batch.length >= INITIAL_BATCH);
+        setLoadedNews(batch);
+        const filtered = applyLocalFilters(batch);
+        const highAll = filtered.filter((item) => item.impactScore > 20);
+        const lowAll = filtered.filter((item) => item.impactScore <= 20);
         setHighImpactAll(highAll);
         setLowImpactAll(lowAll);
 
         const now = new Date();
-        const highRisk = fullRes.list.filter((item) => item.riskLevel === '高').length;
-        const thisWeek = fullRes.list.filter((item) => {
+        const highRisk = filtered.filter((item) => item.riskLevel === '高').length;
+        const thisWeek = filtered.filter((item) => {
           const diff = (now.getTime() - new Date(item.publishDate).getTime()) / (1000 * 60 * 60 * 24);
           return diff >= 0 && diff <= 7;
         }).length;
-        const avgImpact =
-          fullRes.list.length > 0
-            ? Math.round(fullRes.list.reduce((sum, item) => sum + item.impactScore, 0) / fullRes.list.length)
-            : 0;
+        const avgImpact = filtered.length > 0 ? Math.round(filtered.reduce((sum, item) => sum + item.impactScore, 0) / filtered.length) : 0;
 
         setStats({
-          total: fullRes.total,
+          total,
           highRisk,
           thisWeek,
           avgImpact
@@ -86,7 +154,24 @@ function NewsLibraryPage({
     return () => {
       mounted = false;
     };
-  }, [query]);
+  }, [query.dateFrom, query.dateTo]);
+
+  useEffect(() => {
+    const filtered = applyLocalFilters(loadedNews);
+    const highAll = filtered.filter((item) => item.impactScore > 20);
+    const lowAll = filtered.filter((item) => item.impactScore <= 20);
+    setHighImpactAll(highAll);
+    setLowImpactAll(lowAll);
+
+    const now = new Date();
+    const highRisk = filtered.filter((item) => item.riskLevel === '高').length;
+    const thisWeek = filtered.filter((item) => {
+      const diff = (now.getTime() - new Date(item.publishDate).getTime()) / (1000 * 60 * 60 * 24);
+      return diff >= 0 && diff <= 7;
+    }).length;
+    const avgImpact = filtered.length > 0 ? Math.round(filtered.reduce((sum, item) => sum + item.impactScore, 0) / filtered.length) : 0;
+    setStats((prev) => ({ ...prev, total: dbTotal, highRisk, thisWeek, avgImpact }));
+  }, [query, loadedNews, dbTotal]);
 
   useEffect(() => {
     const total = Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
@@ -166,6 +251,45 @@ function NewsLibraryPage({
 
   const copyMarkdown = async () => {
     await navigator.clipboard.writeText(markdown);
+  };
+
+  const loadMore = async (batch = NEXT_BATCH) => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const next = await api.getNewsBatch({
+        offset: loadedNews.length,
+        limit: batch,
+        dateFrom: query.dateFrom || undefined,
+        dateTo: query.dateTo || undefined
+      });
+      if (next.length === 0) {
+        setHasMore(false);
+        return;
+      }
+      setLoadedNews((prev) => [...prev, ...next]);
+      if (next.length < batch) setHasMore(false);
+    } catch {
+      setError('加载更多新闻失败，请稍后重试。');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const gotoHighPage = async (nextPage) => {
+    const needed = nextPage * HIGH_PAGE_SIZE;
+    if (nextPage > highPage && highImpactAll.length < needed && hasMore) {
+      await loadMore(NEXT_BATCH);
+    }
+    setHighPage(Math.max(1, Math.min(nextPage, Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE)))));
+  };
+
+  const gotoLowPage = async (nextPage) => {
+    const needed = nextPage * LOW_PAGE_SIZE;
+    if (nextPage > lowPage && lowImpactAll.length < needed && hasMore) {
+      await loadMore(NEXT_BATCH);
+    }
+    setLowPage(Math.max(1, Math.min(nextPage, Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE)))));
   };
 
   return (
@@ -294,15 +418,15 @@ function NewsLibraryPage({
                 <button
                   type="button"
                   disabled={highPage <= 1}
-                  onClick={() => setHighPage((prev) => Math.max(1, prev - 1))}
+                  onClick={() => gotoHighPage(highPage - 1)}
                   className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   上一页
                 </button>
                 <button
                   type="button"
-                  disabled={highPage >= highTotalPages}
-                  onClick={() => setHighPage((prev) => Math.min(highTotalPages, prev + 1))}
+                  disabled={highPage >= highTotalPages && !hasMore}
+                  onClick={() => gotoHighPage(highPage + 1)}
                   className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   下一页
@@ -351,15 +475,15 @@ function NewsLibraryPage({
                   <button
                     type="button"
                     disabled={lowPage <= 1}
-                    onClick={() => setLowPage((prev) => Math.max(1, prev - 1))}
+                    onClick={() => gotoLowPage(lowPage - 1)}
                     className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     上一页
                   </button>
                   <button
                     type="button"
-                    disabled={lowPage >= lowTotalPages}
-                    onClick={() => setLowPage((prev) => Math.min(lowTotalPages, prev + 1))}
+                    disabled={lowPage >= lowTotalPages && !hasMore}
+                    onClick={() => gotoLowPage(lowPage + 1)}
                     className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     下一页
