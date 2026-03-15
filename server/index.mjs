@@ -1056,7 +1056,7 @@ async function handleNewsRaw(req, res) {
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   upstreamUrl.searchParams.set(
     'select',
-    'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
+    'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
   upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   upstreamUrl.searchParams.set('limit', String(limit));

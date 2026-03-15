@@ -26,6 +26,7 @@ const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MO
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
+let cachePending: Promise<NewsItem[]> | null = null;
 let runtimeDataSource: 'supabase_direct' | 'server_proxy' | 'mock' = 'mock';
 
 function parseUtcTimestamp(raw: unknown): Date | null {
@@ -530,7 +531,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
   const url = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   url.searchParams.set(
     'select',
-    'id,title,content,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
+    'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
   url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   url.searchParams.set('limit', String(SUPABASE_LIMIT));
@@ -567,9 +568,19 @@ async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
 async function getSupabaseNewsCached(force = false): Promise<NewsItem[]> {
   const now = Date.now();
   if (!force && cache && now - cache.ts < 60_000) return cache.list;
-  const list = hasSupabaseConfig() ? await fetchFromSupabaseRaw() : await fetchFromServerProxyRaw();
-  cache = { ts: now, list };
-  return list;
+  if (!force && cachePending) return cachePending;
+
+  const task = (hasSupabaseConfig() ? fetchFromSupabaseRaw() : fetchFromServerProxyRaw())
+    .then((list) => {
+      cache = { ts: Date.now(), list };
+      return list;
+    })
+    .finally(() => {
+      cachePending = null;
+    });
+
+  cachePending = task;
+  return task;
 }
 
 function fallbackNews(): NewsItem[] {
