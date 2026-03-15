@@ -134,9 +134,17 @@ function App() {
           if (metaRes.status === 'fulfilled') setMeta(metaRes.value);
 
           const failedModules = [];
-          if (!newsOk) failedModules.push('新闻列表');
-          if (!matrixOk) failedModules.push('竞争矩阵');
-          if (!insightOk) failedModules.push('战略简报');
+          const hasNewsData = newsOk
+            ? Array.isArray(newsRes.value?.list) && newsRes.value.list.length > 0
+            : Array.isArray(newsBase) && newsBase.length > 0;
+          const hasMatrixData = matrixOk
+            ? Array.isArray(matrixRes.value) && matrixRes.value.length > 0
+            : Array.isArray(matrix) && matrix.length > 0;
+          const hasInsightData = insightOk ? Boolean(insightRes.value) : Boolean(insight);
+
+          if (!newsOk && !hasNewsData) failedModules.push('新闻列表');
+          if (!matrixOk && !hasMatrixData) failedModules.push('竞争矩阵');
+          if (!insightOk && !hasInsightData) failedModules.push('战略简报');
 
           if (failedModules.length > 0) {
             setError(`部分模块加载失败（${failedModules.join('、')}），正在自动重试…`);
