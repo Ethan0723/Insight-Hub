@@ -21,7 +21,8 @@ const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
-const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
+const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 200);
+const LIBRARY_FETCH_LIMIT = Number(import.meta.env.VITE_LIBRARY_FETCH_LIMIT || 1000);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000);
@@ -534,7 +535,7 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
   };
 }
 
-async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
+async function fetchFromSupabaseRaw(limit = SUPABASE_LIMIT): Promise<NewsItem[]> {
   if (!hasSupabaseConfig()) {
     throw new Error('missing supabase config');
   }
@@ -545,7 +546,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
     'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at'
   );
   url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
-  url.searchParams.set('limit', String(SUPABASE_LIMIT));
+  url.searchParams.set('limit', String(limit));
 
   const res = await fetchWithTimeout(url.toString(), {
     headers: {
@@ -564,8 +565,8 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
-async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
-  const res = await fetchWithTimeout(`/api/news_raw?limit=${SUPABASE_LIMIT}`);
+async function fetchFromServerProxyRaw(limit = SUPABASE_LIMIT): Promise<NewsItem[]> {
+  const res = await fetchWithTimeout(`/api/news_raw?limit=${limit}`);
   if (!res.ok) {
     throw new Error(`proxy http ${res.status}`);
   }
@@ -576,12 +577,15 @@ async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
-async function getSupabaseNewsCached(force = false): Promise<NewsItem[]> {
+async function getSupabaseNewsCached(force = false, limit = SUPABASE_LIMIT): Promise<NewsItem[]> {
+  if (limit !== SUPABASE_LIMIT) {
+    return hasSupabaseConfig() ? fetchFromSupabaseRaw(limit) : fetchFromServerProxyRaw(limit);
+  }
   const now = Date.now();
   if (!force && cache && now - cache.ts < 60_000) return cache.list;
   if (!force && cachePending) return cachePending;
 
-  const task = (hasSupabaseConfig() ? fetchFromSupabaseRaw() : fetchFromServerProxyRaw())
+  const task = (hasSupabaseConfig() ? fetchFromSupabaseRaw(SUPABASE_LIMIT) : fetchFromServerProxyRaw(SUPABASE_LIMIT))
     .then((list) => {
       cache = { ts: Date.now(), list };
       return list;
@@ -1117,9 +1121,9 @@ function buildScoreBreakdown(news: NewsItem[], scenario: RevenueScenario): Score
   };
 }
 
-async function getRealOrMockNews(force = false): Promise<NewsItem[]> {
+async function getRealOrMockNews(force = false, limit = SUPABASE_LIMIT): Promise<NewsItem[]> {
   try {
-    const list = await getSupabaseNewsCached(force);
+    const list = await getSupabaseNewsCached(force, limit);
     return list.length > 0 ? list : fallbackNews();
   } catch (err) {
     if (!ALLOW_MOCK_FALLBACK) {
@@ -1146,7 +1150,8 @@ async function getDailyBriefFromData(news: NewsItem[], date?: string): Promise<S
 export const api = {
   async getNews(query: NewsQuery = {}): Promise<PagedResult<NewsItem>> {
     await delay();
-    const list = filterNews(await getRealOrMockNews(), query);
+    const requestedLimit = (query.pageSize || 0) >= 1000 ? LIBRARY_FETCH_LIMIT : SUPABASE_LIMIT;
+    const list = filterNews(await getRealOrMockNews(false, requestedLimit), query);
     return paginate(list, query.page || 1, query.pageSize || 9);
   },
 
