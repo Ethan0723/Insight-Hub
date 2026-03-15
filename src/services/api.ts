@@ -1431,7 +1431,7 @@ export const api = {
     });
     return {
       fetchedCount: rows.length,
-      list: rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item))
+      list: rows.map(toNewsItem).filter((item) => Boolean(item.id))
     };
   }
 };

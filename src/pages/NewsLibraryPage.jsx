@@ -440,7 +440,9 @@ function NewsLibraryPage({
             </div>
             <p className="text-[11px] text-slate-400">高影响事件区：用于优先决策，建议先看本区。</p>
             {highPageList.length === 0 ? (
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-5 text-sm text-slate-400">当前筛选条件下暂无 Impact &gt; 20 的新闻。</div>
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-5 text-sm text-slate-400">
+                {loadingMore || hasMore ? '正在加载更多新闻，请稍候…' : '当前筛选条件下暂无 Impact > 20 的新闻。'}
+              </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {highPageList.map((item) => (
