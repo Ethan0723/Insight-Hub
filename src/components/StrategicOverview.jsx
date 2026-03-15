@@ -204,7 +204,16 @@ function StrategicOverview({
               onOpenEvidence({
                 title: "战略证据",
                 newsIds: evidenceNewsIds,
-                source: "daily_brief"
+                source: "daily_brief",
+                items: citations.map((item, idx) => ({
+                  id: String(item?.id || `brief-citation-${idx}`),
+                  title: safeText(item?.title, `引用新闻 ${idx + 1}`),
+                  source: safeText(item?.source, "daily_brief"),
+                  publishDate: safeText(item?.published_at, "").slice(0, 10),
+                  impactScore: Number(item?.impact_score || 0),
+                  aiTldr: safeText(item?.summary || item?.why_it_matters || brief?.one_liner, "暂无摘要"),
+                  originalUrl: safeText(item?.url, "#")
+                }))
               })
             }
             className="rounded-md border border-slate-600 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"

@@ -1083,7 +1083,7 @@ async function handleNewsRaw(req, res) {
 
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   const select = lite
-    ? 'id,title,title_zh:summary->>title_zh,tldr:summary->>tldr,core_summary:summary->>core_summary,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
+    ? 'id,title,summary,title_zh:summary->>title_zh,tldr:summary->>tldr,core_summary:summary->>core_summary,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
     : 'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at';
   upstreamUrl.searchParams.set('select', select);
   if (dateFrom) {

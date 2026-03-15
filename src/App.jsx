@@ -66,7 +66,7 @@ function App() {
   const [relatedNews, setRelatedNews] = useState([]);
 
   const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [evidenceData, setEvidenceData] = useState({ title: '', newsIds: [] });
+  const [evidenceData, setEvidenceData] = useState({ title: '', newsIds: [], items: [] });
 
   const [libraryPreset, setLibraryPreset] = useState(null);
   const [fabPos, setFabPos] = useState({ x: null, y: null });
@@ -316,8 +316,11 @@ function App() {
 
   const evidenceNews = useMemo(() => {
     const unique = [...new Set(evidenceData.newsIds)];
-    return unique.map((id) => newsMap.get(id)).filter(Boolean);
-  }, [evidenceData.newsIds, newsMap]);
+    const mapped = unique.map((id) => newsMap.get(id)).filter(Boolean);
+    if (mapped.length > 0) return mapped;
+    if (Array.isArray(evidenceData.items) && evidenceData.items.length > 0) return evidenceData.items;
+    return [];
+  }, [evidenceData.newsIds, evidenceData.items, newsMap]);
 
   const indexMap = useMemo(() => {
     const map = {};
@@ -363,7 +366,11 @@ function App() {
   };
 
   const onOpenEvidence = (evidence) => {
-    setEvidenceData({ title: evidence.title, newsIds: evidence.newsIds });
+    setEvidenceData({
+      title: evidence.title,
+      newsIds: Array.isArray(evidence?.newsIds) ? evidence.newsIds : [],
+      items: Array.isArray(evidence?.items) ? evidence.items : []
+    });
     setEvidenceOpen(true);
     track('evidence_open', {
       source: inferEvidenceSource(evidence),
