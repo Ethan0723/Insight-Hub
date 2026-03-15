@@ -20,7 +20,7 @@ const riskSortWeight = { 高: 3, 中: 2, 低: 1 };
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
+const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 120);
 const LIBRARY_FETCH_LIMIT = Number(import.meta.env.VITE_LIBRARY_FETCH_LIMIT || 1000);
 const DEFAULT_RECENT_DAYS = Number(import.meta.env.VITE_DASHBOARD_RECENT_DAYS || 15);
