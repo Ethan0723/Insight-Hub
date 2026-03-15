@@ -23,7 +23,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 120);
 const LIBRARY_FETCH_LIMIT = Number(import.meta.env.VITE_LIBRARY_FETCH_LIMIT || 1000);
-const DEFAULT_RECENT_DAYS = Number(import.meta.env.VITE_DASHBOARD_RECENT_DAYS || 15);
+const DEFAULT_RECENT_DAYS = Number(import.meta.env.VITE_DASHBOARD_RECENT_DAYS || 3);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 45000);
@@ -1353,8 +1353,8 @@ export const api = {
     try {
       return buildMatrix(await getRealOrMockNews());
     } catch (err) {
-      console.warn('[api] getMatrix failed, return empty matrix.', err);
-      return [];
+      console.warn('[api] getMatrix failed, fallback to mock matrix.', err);
+      return mockMatrix;
     }
   },
 

@@ -1,7 +1,23 @@
 function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
   const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
   const platformSet = new Set(targetPlatforms);
-  const matrixRows = (Array.isArray(rows) ? rows : []).filter((item) => platformSet.has(item?.name));
+  const incomingRows = (Array.isArray(rows) ? rows : []).filter((item) => platformSet.has(item?.name));
+  const byName = new Map(incomingRows.map((item) => [item.name, item]));
+  const matrixRows = targetPlatforms.map((platform) => {
+    const hit = byName.get(platform);
+    if (hit) return hit;
+    return {
+      name: platform,
+      weeklyMove: `暂无 ${platform} 本周关键动作，建议继续追踪。`,
+      productUpdate: '暂无显著产品更新',
+      aiUpdate: '暂无明确 AI 动态',
+      evidence: {
+        id: `ev-m-${platform.toLowerCase().replace(/\s+/g, '-')}`,
+        title: `${platform} 竞争引用`,
+        newsIds: []
+      }
+    };
+  });
 
   return (
     <section className="rounded-3xl border border-indigo-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">

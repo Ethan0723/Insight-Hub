@@ -48,10 +48,14 @@ function DashboardPage({
   }, [news, effectiveDate]);
 
   const feedNews = useMemo(() => {
-    return [...selectedDateNews]
+    const primary = [...selectedDateNews]
       .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
       .slice(0, 8);
-  }, [selectedDateNews]);
+    if (primary.length > 0) return primary;
+    return [...news]
+      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
+      .slice(0, 8);
+  }, [selectedDateNews, news]);
 
   return (
     <>
