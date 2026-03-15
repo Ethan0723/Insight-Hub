@@ -1051,7 +1051,7 @@ async function handleNewsRaw(req, res) {
 
   const requestUrl = new URL(req.url || '/api/news_raw', `http://${req.headers.host || 'localhost'}`);
   const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
-  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200;
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 1000;
 
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   upstreamUrl.searchParams.set(
