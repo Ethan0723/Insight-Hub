@@ -1307,15 +1307,15 @@ export const api = {
 
   async getDailyInsight(): Promise<DailyInsight> {
     await delay(180);
-    let news: NewsItem[] = [];
-    try {
-      news = await getRealOrMockNews();
-    } catch (err) {
+    const newsPromise = getRealOrMockNews().catch((err) => {
       console.warn('[api] getDailyInsight news fetch failed, fallback to brief-only path.', err);
-    }
+      return [];
+    });
 
+    // First load daily_brief directly, do not block on news_raw latency.
+    const brief = await getDailyBriefFromData([]);
+    const news = await newsPromise;
     const fallback = news.length > 0 ? buildDailyInsight(news) : mockDailyInsight;
-    const brief = await getDailyBriefFromData(news);
     if (!brief) return fallback;
     return {
       ...fallback,
@@ -1329,8 +1329,16 @@ export const api = {
 
   async getDailyBrief(date?: string): Promise<StrategyBrief | null> {
     await delay(130);
-    const news = await getRealOrMockNews();
-    return getDailyBriefFromData(news, date);
+    const newsPromise = getRealOrMockNews().catch((err) => {
+      console.warn('[api] getDailyBrief news fetch failed, return brief without citation enrichment.', err);
+      return [];
+    });
+    const brief = await getDailyBriefFromData([], date);
+    if (!brief) {
+      const news = await newsPromise;
+      return getDailyBriefFromData(news, date);
+    }
+    return brief;
   },
 
   async getMatrix(): Promise<MatrixRow[]> {
