@@ -49,6 +49,16 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function sendStaticFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
@@ -365,12 +375,23 @@ async function fetchLatestDailyBrief() {
   );
   upstreamUrl.searchParams.set('order', 'generated_at.desc');
   upstreamUrl.searchParams.set('limit', '1');
-  const upstream = await fetch(upstreamUrl.toString(), {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+  let upstream;
+  try {
+    upstream = await fetchWithTimeout(upstreamUrl.toString(), {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+      }
+    });
+  } catch (error) {
+    const msg = String(error?.name || error?.message || '');
+    if (msg.includes('AbortError')) {
+      sendJson(res, 504, { error: 'Upstream news_raw timeout' });
+      return;
     }
-  });
+    sendJson(res, 502, { error: 'Upstream news_raw request failed' });
+    return;
+  }
   const text = await upstream.text();
   if (!upstream.ok) throw new Error(`daily_brief failed ${upstream.status}: ${text.slice(0, 160)}`);
   const rows = safeJsonParse(text, []);

@@ -24,10 +24,21 @@ const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 1000);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
+const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000);
 
 let cache: { ts: number; list: NewsItem[] } | null = null;
 let cachePending: Promise<NewsItem[]> | null = null;
 let runtimeDataSource: 'supabase_direct' | 'server_proxy' | 'mock' = 'mock';
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 function parseUtcTimestamp(raw: unknown): Date | null {
   const text = String(raw || '').trim();
@@ -364,7 +375,7 @@ async function fetchDailyBriefRows(dateKey: string): Promise<any[]> {
     url.searchParams.set('order', 'generated_at.desc');
     url.searchParams.set('limit', '1');
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithTimeout(url.toString(), {
       headers: {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`
@@ -380,7 +391,7 @@ async function fetchDailyBriefRows(dateKey: string): Promise<any[]> {
   if (DAILY_BRIEF_PROMPT_VERSION) {
     url.searchParams.set('prompt_version', DAILY_BRIEF_PROMPT_VERSION);
   }
-  const res = await fetch(`${url.pathname}${url.search}`);
+  const res = await fetchWithTimeout(`${url.pathname}${url.search}`);
   if (!res.ok) throw new Error(`daily_brief proxy http ${res.status}`);
   const rows = await res.json();
   return Array.isArray(rows) ? rows : [];
@@ -536,7 +547,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
   url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   url.searchParams.set('limit', String(SUPABASE_LIMIT));
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithTimeout(url.toString(), {
     headers: {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`
@@ -554,7 +565,7 @@ async function fetchFromSupabaseRaw(): Promise<NewsItem[]> {
 }
 
 async function fetchFromServerProxyRaw(): Promise<NewsItem[]> {
-  const res = await fetch('/api/news_raw');
+  const res = await fetchWithTimeout(`/api/news_raw?limit=${SUPABASE_LIMIT}`);
   if (!res.ok) {
     throw new Error(`proxy http ${res.status}`);
   }
