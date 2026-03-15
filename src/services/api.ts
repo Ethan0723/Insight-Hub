@@ -1398,7 +1398,12 @@ export const api = {
     return total;
   },
 
-  async getNewsBatch(params: { offset: number; limit: number; dateFrom?: string; dateTo?: string }): Promise<NewsItem[]> {
+  async getNewsBatch(params: {
+    offset: number;
+    limit: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{ list: NewsItem[]; fetchedCount: number }> {
     await delay(80);
     const { rows } = await fetchNewsRawPage({
       offset: params.offset,
@@ -1408,6 +1413,9 @@ export const api = {
       includeTotal: false,
       lite: true
     });
-    return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+    return {
+      fetchedCount: rows.length,
+      list: rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item))
+    };
   }
 };

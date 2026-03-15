@@ -30,6 +30,7 @@ function NewsLibraryPage({
   });
   const [loadedNews, setLoadedNews] = useState([]);
   const [dbTotal, setDbTotal] = useState(0);
+  const [cursorOffset, setCursorOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [highImpactAll, setHighImpactAll] = useState([]);
@@ -105,6 +106,7 @@ function NewsLibraryPage({
     setLoading(true);
     setError('');
     setHasMore(true);
+    setCursorOffset(0);
     setLoadedNews([]);
     setHighPage(1);
     setLowPage(1);
@@ -120,7 +122,9 @@ function NewsLibraryPage({
     ])
       .then(([totalRes, batchRes]) => {
         if (!mounted) return;
-        const batch = batchRes.status === 'fulfilled' ? batchRes.value : [];
+        const batchObj = batchRes.status === 'fulfilled' ? batchRes.value : { list: [], fetchedCount: 0 };
+        const batch = Array.isArray(batchObj.list) ? batchObj.list : [];
+        const fetchedCount = Number(batchObj.fetchedCount || 0);
         const total = totalRes.status === 'fulfilled' ? totalRes.value : batch.length;
         if (batchRes.status !== 'fulfilled') {
           setError('新闻明细加载失败，请稍后重试。');
@@ -128,7 +132,8 @@ function NewsLibraryPage({
           setError('总数统计加载较慢，已先展示已加载新闻。');
         }
         setDbTotal(total);
-        setHasMore(batch.length >= INITIAL_BATCH);
+        setCursorOffset(fetchedCount);
+        setHasMore(fetchedCount >= INITIAL_BATCH && fetchedCount < total);
         setLoadedNews(batch);
         const filtered = applyLocalFilters(batch);
         const highAll = filtered.filter((item) => item.impactScore > 20);
@@ -261,18 +266,21 @@ function NewsLibraryPage({
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const next = await api.getNewsBatch({
-        offset: loadedNews.length,
+      const nextObj = await api.getNewsBatch({
+        offset: cursorOffset,
         limit: batch,
         dateFrom: query.dateFrom || undefined,
         dateTo: query.dateTo || undefined
       });
-      if (next.length === 0) {
+      const next = Array.isArray(nextObj.list) ? nextObj.list : [];
+      const fetchedCount = Number(nextObj.fetchedCount || 0);
+      if (fetchedCount === 0) {
         setHasMore(false);
         return;
       }
+      setCursorOffset((prev) => prev + fetchedCount);
       setLoadedNews((prev) => [...prev, ...next]);
-      if (next.length < batch) setHasMore(false);
+      if (fetchedCount < batch || cursorOffset + fetchedCount >= dbTotal) setHasMore(false);
     } catch {
       setError('加载更多新闻失败，请稍后重试。');
     } finally {
@@ -281,19 +289,29 @@ function NewsLibraryPage({
   };
 
   const gotoHighPage = async (nextPage) => {
+    if (nextPage <= 1) {
+      setHighPage(1);
+      return;
+    }
     const needed = nextPage * HIGH_PAGE_SIZE;
     if (nextPage > highPage && highImpactAll.length < needed && hasMore) {
       await loadMore(NEXT_BATCH);
     }
-    setHighPage(Math.max(1, Math.min(nextPage, Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE)))));
+    const cap = hasMore ? nextPage : Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
+    setHighPage(Math.max(1, Math.min(nextPage, cap)));
   };
 
   const gotoLowPage = async (nextPage) => {
+    if (nextPage <= 1) {
+      setLowPage(1);
+      return;
+    }
     const needed = nextPage * LOW_PAGE_SIZE;
     if (nextPage > lowPage && lowImpactAll.length < needed && hasMore) {
       await loadMore(NEXT_BATCH);
     }
-    setLowPage(Math.max(1, Math.min(nextPage, Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE)))));
+    const cap = hasMore ? nextPage : Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
+    setLowPage(Math.max(1, Math.min(nextPage, cap)));
   };
 
   return (
