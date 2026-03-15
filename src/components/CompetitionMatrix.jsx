@@ -1,4 +1,8 @@
 function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
+  const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
+  const platformSet = new Set(targetPlatforms);
+  const matrixRows = (Array.isArray(rows) ? rows : []).filter((item) => platformSet.has(item?.name));
+
   return (
     <section className="rounded-3xl border border-indigo-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
@@ -18,7 +22,7 @@ function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
         </div>
 
         <div className="divide-y divide-slate-800 bg-slate-950/60">
-          {rows.map((item) => (
+          {matrixRows.map((item) => (
             <div key={item.name} className="grid grid-cols-5 gap-3 px-4 py-4 text-xs text-slate-200">
               <p className="font-semibold text-cyan-200">{item.name}</p>
               <p>{item.weeklyMove}</p>
