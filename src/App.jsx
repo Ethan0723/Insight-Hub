@@ -60,33 +60,53 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
+    const withTimeout = (promise, ms = 15000) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+      ]);
 
     setLoading(true);
     setError('');
 
-    Promise.all([
-      api.getNews({ page: 1, pageSize: 200 }),
-      api.getDailyInsight(),
-      api.getMatrix(),
-      api.getAppMeta(),
-      api.getRevenueImpact(defaultScenario),
-      api.getScoreBreakdown(defaultScenario)
+    Promise.allSettled([
+      withTimeout(api.getNews({ page: 1, pageSize: 200 }), 15000),
+      withTimeout(api.getDailyInsight(), 15000),
+      withTimeout(api.getMatrix(), 15000),
+      withTimeout(api.getAppMeta(), 15000)
     ])
-      .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes, scoreRes]) => {
+      .then((results) => {
         if (!mounted) return;
-        setNewsBase(newsRes.list);
-        setInsight(insightRes);
-        setMatrix(matrixRes);
-        setMeta(metaRes);
-        setRevenueResult(revenueRes);
-        setScoreBreakdown(scoreRes);
-      })
-      .catch(() => {
-        if (mounted) setError('首页数据加载失败，请刷新重试。');
+        const [newsRes, insightRes, matrixRes, metaRes] = results;
+
+        const coreOk =
+          newsRes.status === 'fulfilled' &&
+          insightRes.status === 'fulfilled' &&
+          matrixRes.status === 'fulfilled';
+
+        if (!coreOk) {
+          setError('首页核心数据加载失败，请刷新重试。');
+          return;
+        }
+
+        setNewsBase(newsRes.value.list);
+        setInsight(insightRes.value);
+        setMatrix(matrixRes.value);
+        if (metaRes.status === 'fulfilled') setMeta(metaRes.value);
       })
       .finally(() => {
         if (mounted) setLoading(false);
       });
+
+    Promise.allSettled([
+      withTimeout(api.getRevenueImpact(defaultScenario), 20000),
+      withTimeout(api.getScoreBreakdown(defaultScenario), 20000)
+    ]).then((results) => {
+      if (!mounted) return;
+      const [revenueRes, scoreRes] = results;
+      if (revenueRes.status === 'fulfilled') setRevenueResult(revenueRes.value);
+      if (scoreRes.status === 'fulfilled') setScoreBreakdown(scoreRes.value);
+    });
 
     return () => {
       mounted = false;
@@ -315,7 +335,7 @@ function App() {
     );
   }
 
-  if (!insight || !revenueResult || !scoreBreakdown) {
+  if (!insight) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">

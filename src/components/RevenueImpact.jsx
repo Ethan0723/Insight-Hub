@@ -67,6 +67,20 @@ function applyScenarioPatch(base, patch) {
 function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioApply, result, scoreBreakdown, onOpenEvidence }) {
   const [expandedId, setExpandedId] = useState('payment');
 
+  if (!result || !scoreBreakdown) {
+    return (
+      <section data-ga-section="sandbox" className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
+          <span className="text-xs text-slate-400">加载中...</span>
+        </div>
+        <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-400">
+          收入沙盘与评分拆解正在计算，请稍候。
+        </div>
+      </section>
+    );
+  }
+
   const sliders = useMemo(
     () => [
       { key: 'arpuDelta', label: '订阅 ARPU 调整', min: -10, max: 10, step: 0.5, value: scenario.arpuDelta },
