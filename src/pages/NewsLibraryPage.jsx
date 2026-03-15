@@ -14,7 +14,7 @@ function NewsLibraryPage({
 }) {
   const HIGH_PAGE_SIZE = 9;
   const LOW_PAGE_SIZE = 9;
-  const INITIAL_BATCH = 100;
+  const INITIAL_BATCH = 60;
   const NEXT_BATCH = 20;
   const [query, setQuery] = useState({
     sortBy: 'time',

@@ -1373,7 +1373,7 @@ export const api = {
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       includeTotal: false,
-      lite: false
+      lite: true
     });
     return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
   }
