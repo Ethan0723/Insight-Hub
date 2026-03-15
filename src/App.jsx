@@ -8,25 +8,11 @@ import NewsLibraryPage from './pages/NewsLibraryPage';
 import { api } from './services/api';
 import { storage } from './services/storage';
 import { track, trackPageView, trackSectionView } from './lib/analytics';
-import { mockDailyInsight, mockMatrix, mockModelExplainers } from './data/mock/dashboard';
-import { calculateRevenueImpact } from './data/mock/revenue';
 
 const defaultScenario = {
   arpuDelta: 0,
   commissionDelta: 0,
   paymentSuccessDelta: 0
-};
-
-const defaultScoreBreakdown = {
-  baseline: { subscription: 50, commission: 50, payment: 50, ecosystem: 50, overall: 50 },
-  delta: { subscription: 0, commission: 0, payment: 0, ecosystem: 0, overall: 0 },
-  final: { subscription: 50, commission: 50, payment: 50, ecosystem: 50, overall: 50 },
-  explain: {
-    baselineMethod: 'Baseline：外部态势（新闻驱动，leading indicator）。',
-    deltaMethod: 'Δ：策略参数变化（沙盘仿真，what-if）。',
-    notes: ['Final = clamp(Baseline + Δ, 0..100)', 'Final 用于策略优先级决策。']
-  },
-  evidence: { subscription: [], commission: [], payment: [], ecosystem: [] }
 };
 
 function App() {
@@ -37,20 +23,17 @@ function App() {
   const [activeNav, setActiveNav] = useState('overview');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const [newsBase, setNewsBase] = useState([]);
-  const [insight, setInsight] = useState(mockDailyInsight);
-  const [matrix, setMatrix] = useState(mockMatrix);
-  const [meta, setMeta] = useState({
-    assistant: { samples: [], response: { affectedModules: [], strategy: [] } },
-    explainers: mockModelExplainers
-  });
+  const [insight, setInsight] = useState(null);
+  const [matrix, setMatrix] = useState([]);
+  const [meta, setMeta] = useState({ assistant: { samples: [], response: { affectedModules: [], strategy: [] } }, explainers: [] });
 
   const [scenario, setScenario] = useState(defaultScenario);
-  const [revenueResult, setRevenueResult] = useState(calculateRevenueImpact(defaultScenario));
-  const [scoreBreakdown, setScoreBreakdown] = useState(defaultScoreBreakdown);
+  const [revenueResult, setRevenueResult] = useState(null);
+  const [scoreBreakdown, setScoreBreakdown] = useState(null);
 
   const [favorites, setFavorites] = useState(storage.getFavorites());
   const [readIds, setReadIds] = useState(storage.getReadNewsIds());
@@ -76,14 +59,22 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
+    const withTimeout = (promise, ms = 15000) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+      ]);
+
+    setLoading(true);
+    setError('');
 
     Promise.all([
-      api.getNews({ page: 1, pageSize: 200 }),
-      api.getDailyInsight(),
-      api.getMatrix(),
-      api.getAppMeta(),
-      api.getRevenueImpact(defaultScenario),
-      api.getScoreBreakdown(defaultScenario)
+      withTimeout(api.getNews({ page: 1, pageSize: 200 })),
+      withTimeout(api.getDailyInsight()),
+      withTimeout(api.getMatrix()),
+      withTimeout(api.getAppMeta()),
+      withTimeout(api.getRevenueImpact(defaultScenario)),
+      withTimeout(api.getScoreBreakdown(defaultScenario))
     ])
       .then(([newsRes, insightRes, matrixRes, metaRes, revenueRes, scoreRes]) => {
         if (!mounted) return;
@@ -95,7 +86,7 @@ function App() {
         setScoreBreakdown(scoreRes);
       })
       .catch(() => {
-        if (mounted) setError('网络较慢，已先展示默认视图，数据会自动刷新。');
+        if (mounted) setError('首页数据加载失败，请刷新重试。');
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -138,6 +129,7 @@ function App() {
   }, [activeNav, insight, newsBase, scoreBreakdown]);
 
   useEffect(() => {
+    if (loading || !insight) return;
     let mounted = true;
     Promise.all([api.getRevenueImpact(scenario), api.getScoreBreakdown(scenario)]).then(([revenueRes, scoreRes]) => {
       if (!mounted) return;
@@ -289,11 +281,33 @@ function App() {
     setScenario((prev) => ({ ...prev, ...patch }));
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-[1400px] px-4 py-20 lg:px-8">
+          <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-800" />
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div key={idx} className="h-40 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!insight || !revenueResult || !scoreBreakdown) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
           <p className="text-sm text-rose-300">{error || '系统加载异常'}</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40"
+          >
+            刷新重试
+          </button>
         </div>
       </div>
     );
