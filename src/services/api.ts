@@ -1264,17 +1264,24 @@ export const api = {
     await delay();
     const isLibraryHeavyQuery = (query.pageSize || 0) >= 1000;
     const requestedLimit = isLibraryHeavyQuery ? LIBRARY_FETCH_LIMIT : SUPABASE_LIMIT;
-    const list = filterNews(
-      await getRealOrMockNews(
-        false,
-        requestedLimit,
-        !isLibraryHeavyQuery,
-        query.dateFrom || query.dateTo ? null : isLibraryHeavyQuery ? null : DEFAULT_RECENT_DAYS,
-        query.dateFrom,
-        query.dateTo
-      ),
-      query
-    );
+    let source: NewsItem[] = [];
+    try {
+      source = await Promise.race([
+        getRealOrMockNews(
+          false,
+          requestedLimit,
+          !isLibraryHeavyQuery,
+          query.dateFrom || query.dateTo ? null : isLibraryHeavyQuery ? null : DEFAULT_RECENT_DAYS,
+          query.dateFrom,
+          query.dateTo
+        ),
+        delay(1800).then(() => [])
+      ]);
+    } catch (err) {
+      console.warn('[api] getNews failed, return empty list.', err);
+      source = [];
+    }
+    const list = filterNews(source, query);
     return paginate(list, query.page || 1, query.pageSize || 9);
   },
 
@@ -1353,14 +1360,21 @@ export const api = {
 
   async getRevenueImpact(scenario: RevenueScenario): Promise<RevenueImpactResult> {
     await delay(160);
-    const news = await getRealOrMockNews();
+    const news = await Promise.race([
+      getRealOrMockNews().catch(() => fallbackNews()),
+      delay(1800).then(() => fallbackNews())
+    ]);
     const result = calculateRevenueImpact(scenario);
     return enrichRevenueWithEvidence(result, news);
   },
 
   async getScoreBreakdown(scenario: RevenueScenario): Promise<ScoreBreakdown> {
     await delay(140);
-    return buildScoreBreakdown(await getRealOrMockNews(), scenario);
+    const news = await Promise.race([
+      getRealOrMockNews().catch(() => fallbackNews()),
+      delay(1800).then(() => fallbackNews())
+    ]);
+    return buildScoreBreakdown(news, scenario);
   },
 
   async getAppMeta() {
