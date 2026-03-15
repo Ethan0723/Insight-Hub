@@ -30,6 +30,8 @@ function NewsLibraryPage({
   });
   const [loadedNews, setLoadedNews] = useState([]);
   const [dbTotal, setDbTotal] = useState(0);
+  const [highDbTotal, setHighDbTotal] = useState(0);
+  const [lowDbTotal, setLowDbTotal] = useState(0);
   const [cursorOffset, setCursorOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -113,6 +115,8 @@ function NewsLibraryPage({
 
     Promise.allSettled([
       api.getNewsTotal(query.dateFrom, query.dateTo),
+      api.getNewsTotal(query.dateFrom, query.dateTo, { impactGt: 20 }),
+      api.getNewsTotal(query.dateFrom, query.dateTo, { impactLte: 20 }),
       api.getNewsBatch({
         offset: 0,
         limit: INITIAL_BATCH,
@@ -120,18 +124,22 @@ function NewsLibraryPage({
         dateTo: query.dateTo || undefined
       })
     ])
-      .then(([totalRes, batchRes]) => {
+      .then(([totalRes, highTotalRes, lowTotalRes, batchRes]) => {
         if (!mounted) return;
         const batchObj = batchRes.status === 'fulfilled' ? batchRes.value : { list: [], fetchedCount: 0 };
         const batch = Array.isArray(batchObj.list) ? batchObj.list : [];
         const fetchedCount = Number(batchObj.fetchedCount || 0);
         const total = totalRes.status === 'fulfilled' ? totalRes.value : batch.length;
+        const highTotal = highTotalRes.status === 'fulfilled' ? highTotalRes.value : batch.filter((item) => item.impactScore > 20).length;
+        const lowTotal = lowTotalRes.status === 'fulfilled' ? lowTotalRes.value : batch.filter((item) => item.impactScore <= 20).length;
         if (batchRes.status !== 'fulfilled') {
           setError('新闻明细加载失败，请稍后重试。');
         } else if (totalRes.status !== 'fulfilled') {
           setError('总数统计加载较慢，已先展示已加载新闻。');
         }
         setDbTotal(total);
+        setHighDbTotal(highTotal);
+        setLowDbTotal(lowTotal);
         setCursorOffset(fetchedCount);
         setHasMore(fetchedCount >= INITIAL_BATCH && fetchedCount < total);
         setLoadedNews(batch);
@@ -182,23 +190,34 @@ function NewsLibraryPage({
     setStats((prev) => ({ ...prev, total: dbTotal, highRisk, thisWeek, avgImpact }));
   }, [query, loadedNews, dbTotal]);
 
+  const hasAdvancedFilters =
+    query.platforms.length > 0 ||
+    query.regions.length > 0 ||
+    query.moduleTags.length > 0 ||
+    query.riskLevels.length > 0 ||
+    query.impactDimensions.length > 0 ||
+    Boolean(query.keyword?.trim()) ||
+    (query.ids && query.ids.length > 0);
+
   useEffect(() => {
     const total = Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
-    if (highPage > total) setHighPage(total);
-  }, [highImpactAll.length, highPage]);
+    if (!hasMore && highPage > total) setHighPage(total);
+  }, [highImpactAll.length, highPage, hasMore]);
 
   useEffect(() => {
     const total = Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
-    if (lowPage > total) setLowPage(total);
-  }, [lowImpactAll.length, lowPage]);
+    if (!hasMore && lowPage > total) setLowPage(total);
+  }, [lowImpactAll.length, lowPage, hasMore]);
 
   const allPlatforms = useMemo(() => ['Shopify', 'Shopline', 'Shoplazza', 'Amazon', 'TikTok Shop', 'Temu'], []);
   const allRegions = useMemo(() => ['US', 'EU', 'UK', 'SEA', 'Global'], []);
   const allModules = useMemo(() => ['政策', '平台', '财报', '支付', '广告', '物流', 'AI', '宏观'], []);
   const allDims = useMemo(() => ['订阅', '佣金', '支付', '生态'], []);
 
-  const highTotalPages = Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
-  const lowTotalPages = Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
+  const highTotalCount = hasAdvancedFilters ? highImpactAll.length : highDbTotal;
+  const lowTotalCount = hasAdvancedFilters ? lowImpactAll.length : lowDbTotal;
+  const highTotalPages = Math.max(1, Math.ceil(highTotalCount / HIGH_PAGE_SIZE));
+  const lowTotalPages = Math.max(1, Math.ceil(lowTotalCount / LOW_PAGE_SIZE));
   const highStart = (highPage - 1) * HIGH_PAGE_SIZE;
   const lowStart = (lowPage - 1) * LOW_PAGE_SIZE;
   const highPageList = highImpactAll.slice(highStart, highStart + HIGH_PAGE_SIZE);
@@ -278,9 +297,10 @@ function NewsLibraryPage({
         setHasMore(false);
         return;
       }
-      setCursorOffset((prev) => prev + fetchedCount);
+      const nextOffset = cursorOffset + fetchedCount;
+      setCursorOffset(nextOffset);
       setLoadedNews((prev) => [...prev, ...next]);
-      if (fetchedCount < batch || cursorOffset + fetchedCount >= dbTotal) setHasMore(false);
+      if (fetchedCount < batch || nextOffset >= dbTotal) setHasMore(false);
     } catch {
       setError('加载更多新闻失败，请稍后重试。');
     } finally {
@@ -293,12 +313,9 @@ function NewsLibraryPage({
       setHighPage(1);
       return;
     }
-    const needed = nextPage * HIGH_PAGE_SIZE;
-    if (nextPage > highPage && highImpactAll.length < needed && hasMore) {
-      await loadMore(NEXT_BATCH);
-    }
-    const cap = hasMore ? nextPage : Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE));
-    setHighPage(Math.max(1, Math.min(nextPage, cap)));
+    const target = Math.max(1, nextPage);
+    const cap = hasAdvancedFilters ? (hasMore ? target : Math.max(1, Math.ceil(highImpactAll.length / HIGH_PAGE_SIZE))) : highTotalPages;
+    setHighPage(Math.max(1, Math.min(target, cap)));
   };
 
   const gotoLowPage = async (nextPage) => {
@@ -306,13 +323,26 @@ function NewsLibraryPage({
       setLowPage(1);
       return;
     }
-    const needed = nextPage * LOW_PAGE_SIZE;
-    if (nextPage > lowPage && lowImpactAll.length < needed && hasMore) {
-      await loadMore(NEXT_BATCH);
-    }
-    const cap = hasMore ? nextPage : Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE));
-    setLowPage(Math.max(1, Math.min(nextPage, cap)));
+    const target = Math.max(1, nextPage);
+    const cap = hasAdvancedFilters ? (hasMore ? target : Math.max(1, Math.ceil(lowImpactAll.length / LOW_PAGE_SIZE))) : lowTotalPages;
+    setLowPage(Math.max(1, Math.min(target, cap)));
   };
+
+  useEffect(() => {
+    const needed = highPage * HIGH_PAGE_SIZE;
+    if (highImpactAll.length < needed && hasMore && !loadingMore) {
+      loadMore(NEXT_BATCH);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highPage, highImpactAll.length, hasMore, loadingMore]);
+
+  useEffect(() => {
+    const needed = lowPage * LOW_PAGE_SIZE;
+    if (lowImpactAll.length < needed && hasMore && !loadingMore) {
+      loadMore(NEXT_BATCH);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lowPage, lowImpactAll.length, hasMore, loadingMore]);
 
   return (
     <section className="space-y-5">
@@ -406,7 +436,7 @@ function NewsLibraryPage({
           <div className="space-y-3 rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.03] p-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-200">主新闻区（Impact &gt; 20）</h3>
-              <span className="text-xs text-cyan-200">共 {highImpactAll.length} 条</span>
+              <span className="text-xs text-cyan-200">共 {highTotalCount} 条</span>
             </div>
             <p className="text-[11px] text-slate-400">高影响事件区：用于优先决策，建议先看本区。</p>
             {highPageList.length === 0 ? (
@@ -447,7 +477,7 @@ function NewsLibraryPage({
                 </button>
                 <button
                   type="button"
-                  disabled={highPage >= highTotalPages && !hasMore}
+                  disabled={hasAdvancedFilters ? highPage >= highTotalPages && !hasMore : highPage >= highTotalPages}
                   onClick={() => gotoHighPage(highPage + 1)}
                   className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -467,7 +497,7 @@ function NewsLibraryPage({
             <div className="mt-4 space-y-3 rounded-2xl border border-slate-700/80 bg-slate-900/30 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-200">低影响新闻区（Impact ≤ 20）</h3>
-                <span className="text-xs text-slate-400">共 {lowImpactAll.length} 条</span>
+                <span className="text-xs text-slate-400">共 {lowTotalCount} 条</span>
               </div>
               <p className="text-[11px] text-slate-500">背景信号区：用于补充上下文与跟踪长期变化。</p>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -504,7 +534,7 @@ function NewsLibraryPage({
                   </button>
                   <button
                     type="button"
-                    disabled={lowPage >= lowTotalPages && !hasMore}
+                    disabled={hasAdvancedFilters ? lowPage >= lowTotalPages && !hasMore : lowPage >= lowTotalPages}
                     onClick={() => gotoLowPage(lowPage + 1)}
                     className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                   >

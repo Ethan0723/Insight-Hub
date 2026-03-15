@@ -369,8 +369,10 @@ async function fetchNewsRawPage(params: {
   dateTo?: string;
   includeTotal?: boolean;
   lite?: boolean;
+  impactGt?: number;
+  impactLte?: number;
 }): Promise<{ rows: any[]; total: number }> {
-  const { offset, limit, dateFrom, dateTo, includeTotal = false, lite = false } = params;
+  const { offset, limit, dateFrom, dateTo, includeTotal = false, lite = false, impactGt, impactLte } = params;
 
   if (hasSupabaseConfig()) {
     const url = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
@@ -381,8 +383,14 @@ async function fetchNewsRawPage(params: {
     url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
     url.searchParams.set('offset', String(Math.max(0, offset)));
     url.searchParams.set('limit', String(Math.max(1, Math.min(1000, limit))));
-    if (dateFrom) url.searchParams.set('publish_time', `gte.${dateFrom}T00:00:00+08:00`);
-    if (dateTo) url.searchParams.set('publish_time', `lte.${dateTo}T23:59:59+08:00`);
+    const andFilters: string[] = [];
+    if (dateFrom) andFilters.push(`publish_time.gte.${dateFrom}T00:00:00+08:00`);
+    if (dateTo) andFilters.push(`publish_time.lte.${dateTo}T23:59:59+08:00`);
+    if (Number.isFinite(impactGt as number)) andFilters.push(`impact_score.gt.${Number(impactGt)}`);
+    if (Number.isFinite(impactLte as number)) andFilters.push(`impact_score.lte.${Number(impactLte)}`);
+    if (andFilters.length > 0) {
+      url.searchParams.set('and', `(${andFilters.join(',')})`);
+    }
 
     const headers: Record<string, string> = {
       apikey: SUPABASE_ANON_KEY,
@@ -413,6 +421,8 @@ async function fetchNewsRawPage(params: {
   if (includeTotal) params2.set('include_total', '1');
   if (dateFrom) params2.set('date_from', dateFrom);
   if (dateTo) params2.set('date_to', dateTo);
+  if (Number.isFinite(impactGt as number)) params2.set('impact_gt', String(impactGt));
+  if (Number.isFinite(impactLte as number)) params2.set('impact_lte', String(impactLte));
   const res = await fetchWithTimeout(`/api/news_raw?${params2.toString()}`);
   if (!res.ok) throw new Error(`proxy page http ${res.status}`);
   const body = await res.json();
@@ -1385,7 +1395,11 @@ export const api = {
     };
   },
 
-  async getNewsTotal(dateFrom?: string, dateTo?: string): Promise<number> {
+  async getNewsTotal(
+    dateFrom?: string,
+    dateTo?: string,
+    options?: { impactGt?: number; impactLte?: number }
+  ): Promise<number> {
     await delay(60);
     const { total } = await fetchNewsRawPage({
       offset: 0,
@@ -1393,7 +1407,9 @@ export const api = {
       dateFrom,
       dateTo,
       includeTotal: true,
-      lite: true
+      lite: true,
+      impactGt: options?.impactGt,
+      impactLte: options?.impactLte
     });
     return total;
   },
