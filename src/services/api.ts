@@ -1307,8 +1307,14 @@ export const api = {
 
   async getDailyInsight(): Promise<DailyInsight> {
     await delay(180);
-    const news = await getRealOrMockNews();
-    const fallback = buildDailyInsight(news);
+    let news: NewsItem[] = [];
+    try {
+      news = await getRealOrMockNews();
+    } catch (err) {
+      console.warn('[api] getDailyInsight news fetch failed, fallback to brief-only path.', err);
+    }
+
+    const fallback = news.length > 0 ? buildDailyInsight(news) : mockDailyInsight;
     const brief = await getDailyBriefFromData(news);
     if (!brief) return fallback;
     return {
@@ -1329,7 +1335,12 @@ export const api = {
 
   async getMatrix(): Promise<MatrixRow[]> {
     await delay(150);
-    return buildMatrix(await getRealOrMockNews());
+    try {
+      return buildMatrix(await getRealOrMockNews());
+    } catch (err) {
+      console.warn('[api] getMatrix failed, return empty matrix.', err);
+      return [];
+    }
   },
 
   async getRevenueImpact(scenario: RevenueScenario): Promise<RevenueImpactResult> {

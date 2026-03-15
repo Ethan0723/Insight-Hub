@@ -109,7 +109,7 @@ function NewsLibraryPage({
     setHighPage(1);
     setLowPage(1);
 
-    Promise.all([
+    Promise.allSettled([
       api.getNewsTotal(query.dateFrom, query.dateTo),
       api.getNewsBatch({
         offset: 0,
@@ -118,8 +118,15 @@ function NewsLibraryPage({
         dateTo: query.dateTo || undefined
       })
     ])
-      .then(([total, batch]) => {
+      .then(([totalRes, batchRes]) => {
         if (!mounted) return;
+        const batch = batchRes.status === 'fulfilled' ? batchRes.value : [];
+        const total = totalRes.status === 'fulfilled' ? totalRes.value : batch.length;
+        if (batchRes.status !== 'fulfilled') {
+          setError('新闻明细加载失败，请稍后重试。');
+        } else if (totalRes.status !== 'fulfilled') {
+          setError('总数统计加载较慢，已先展示已加载新闻。');
+        }
         setDbTotal(total);
         setHasMore(batch.length >= INITIAL_BATCH);
         setLoadedNews(batch);
@@ -143,9 +150,6 @@ function NewsLibraryPage({
           thisWeek,
           avgImpact
         });
-      })
-      .catch(() => {
-        if (mounted) setError('加载新闻失败，请稍后重试。');
       })
       .finally(() => {
         if (mounted) setLoading(false);

@@ -101,6 +101,11 @@ function App() {
 
     setError('');
 
+    const scheduleRetry = () => {
+      if (retryTimer) window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(loadCore, 3000);
+    };
+
     const loadCore = () => {
       Promise.allSettled([
         withTimeout(api.getNews({ page: 1, pageSize: 200 }), 15000),
@@ -112,28 +117,39 @@ function App() {
           if (!mounted) return;
           const [newsRes, insightRes, matrixRes, metaRes] = results;
 
-          const coreOk =
-            newsRes.status === 'fulfilled' &&
-            insightRes.status === 'fulfilled' &&
-            matrixRes.status === 'fulfilled';
+          const hasCachedInsight = Boolean(cached?.insight);
+          const insightOk = insightRes.status === 'fulfilled';
+          const newsOk = newsRes.status === 'fulfilled';
+          const matrixOk = matrixRes.status === 'fulfilled';
 
-          if (!coreOk) {
+          if (!insightOk && !hasCachedInsight) {
             setError(cached ? '网络波动，正在自动重试刷新数据…' : '首页核心数据加载失败，正在自动重试…');
-            retryTimer = window.setTimeout(loadCore, 3000);
+            scheduleRetry();
             return;
           }
 
-          setError('');
-          setNewsBase(newsRes.value.list);
-          setInsight(insightRes.value);
-          setMatrix(matrixRes.value);
+          if (insightOk) setInsight(insightRes.value);
+          if (newsOk) setNewsBase(newsRes.value.list);
+          if (matrixOk) setMatrix(matrixRes.value);
           if (metaRes.status === 'fulfilled') setMeta(metaRes.value);
-          writeCoreSnapshot({
-            newsBase: newsRes.value.list,
-            insight: insightRes.value,
-            matrix: matrixRes.value,
-            meta: metaRes.status === 'fulfilled' ? metaRes.value : meta
-          });
+
+          const failedModules = [];
+          if (!newsOk) failedModules.push('新闻列表');
+          if (!matrixOk) failedModules.push('竞争矩阵');
+          if (!insightOk) failedModules.push('战略简报');
+
+          if (failedModules.length > 0) {
+            setError(`部分模块加载失败（${failedModules.join('、')}），正在自动重试…`);
+            scheduleRetry();
+          } else {
+            setError('');
+            writeCoreSnapshot({
+              newsBase: newsRes.value.list,
+              insight: insightRes.value,
+              matrix: matrixRes.value,
+              meta: metaRes.status === 'fulfilled' ? metaRes.value : meta
+            });
+          }
         })
         .finally(() => {
           if (mounted) setLoading(false);
