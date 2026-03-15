@@ -1074,12 +1074,24 @@ async function handleNewsRaw(req, res) {
   const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 1000;
   const lite = String(requestUrl.searchParams.get('lite') || '') === '1';
+  const recentDays = Number.parseInt(String(requestUrl.searchParams.get('recent_days') || ''), 10);
+  const dateFrom = String(requestUrl.searchParams.get('date_from') || '').trim();
+  const dateTo = String(requestUrl.searchParams.get('date_to') || '').trim();
 
   const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   const select = lite
-    ? 'id,title,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
+    ? 'id,title,title_zh:summary->>title_zh,tldr:summary->>tldr,core_summary:summary->>core_summary,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
     : 'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at';
   upstreamUrl.searchParams.set('select', select);
+  if (dateFrom) {
+    upstreamUrl.searchParams.set('publish_time', `gte.${dateFrom}T00:00:00+08:00`);
+  } else if (Number.isFinite(recentDays) && recentDays > 0) {
+    const start = new Date(Date.now() - recentDays * 24 * 60 * 60 * 1000).toISOString();
+    upstreamUrl.searchParams.set('publish_time', `gte.${start}`);
+  }
+  if (dateTo) {
+    upstreamUrl.searchParams.set('publish_time', `lte.${dateTo}T23:59:59+08:00`);
+  }
   upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   upstreamUrl.searchParams.set('limit', String(limit));
 

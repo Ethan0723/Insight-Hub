@@ -23,6 +23,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 const SUPABASE_LIMIT = Number(import.meta.env.VITE_SUPABASE_NEWS_LIMIT || 120);
 const LIBRARY_FETCH_LIMIT = Number(import.meta.env.VITE_LIBRARY_FETCH_LIMIT || 1000);
+const DEFAULT_RECENT_DAYS = Number(import.meta.env.VITE_DASHBOARD_RECENT_DAYS || 15);
 const ALLOW_MOCK_FALLBACK = import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true';
 const DAILY_BRIEF_PROMPT_VERSION = import.meta.env.VITE_DAILY_BRIEF_PROMPT_VERSION || '';
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 45000);
@@ -177,7 +178,7 @@ function normalizeImpactDimensions(summaryObj: any, moduleTags: string[]): Array
 function toNewsItem(row: any): NewsItem {
   const summaryObj = typeof row.summary === 'string' ? safeParseJson(row.summary) : row.summary || {};
   const rawTitle = String(row.title || '').trim();
-  const titleZh = String(summaryObj?.title_zh || '').trim();
+  const titleZh = String(row.title_zh || summaryObj?.title_zh || '').trim();
   const title = titleZh || rawTitle || 'Untitled';
   const content = String(row.content || '').trim();
   const baseText = [title, content, JSON.stringify(summaryObj || {})].join(' ');
@@ -206,12 +207,15 @@ function toNewsItem(row: any): NewsItem {
   }));
 
   const aiTldr =
+    String(row.tldr || '').trim() ||
     String(summaryObj?.tldr || '').trim() ||
+    String(row.core_summary || '').trim() ||
     String(summaryObj?.core_summary || '').trim() ||
     content.slice(0, 120) ||
     title;
 
   const summary =
+    String(row.core_summary || '').trim() ||
     String(summaryObj?.core_summary || '').trim() ||
     String(summaryObj?.industry_impact || '').trim() ||
     String(summaryObj?.platform_saas_insight || '').trim() ||
@@ -535,16 +539,31 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
   };
 }
 
-async function fetchFromSupabaseRaw(limit = SUPABASE_LIMIT, lite = true): Promise<NewsItem[]> {
+async function fetchFromSupabaseRaw(
+  limit = SUPABASE_LIMIT,
+  lite = true,
+  recentDays: number | null = DEFAULT_RECENT_DAYS,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<NewsItem[]> {
   if (!hasSupabaseConfig()) {
     throw new Error('missing supabase config');
   }
 
   const url = new URL(`${SUPABASE_URL}/rest/v1/news_raw`);
   const select = lite
-    ? 'id,title,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
+    ? 'id,title,title_zh:summary->>title_zh,tldr:summary->>tldr,core_summary:summary->>core_summary,source,url,publish_time,created_at,impact_score,risk_level,platform,region,event_type'
     : 'id,title,source,url,publish_time,created_at,summary,impact_score,risk_level,platform,region,event_type,importance_level,sentiment_score,summary_generated_at';
   url.searchParams.set('select', select);
+  if (dateFrom) {
+    url.searchParams.set('publish_time', `gte.${dateFrom}T00:00:00+08:00`);
+  } else if (recentDays && recentDays > 0) {
+    const start = new Date(Date.now() - recentDays * 24 * 60 * 60 * 1000).toISOString();
+    url.searchParams.set('publish_time', `gte.${start}`);
+  }
+  if (dateTo) {
+    url.searchParams.set('publish_time', `lte.${dateTo}T23:59:59+08:00`);
+  }
   url.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
   url.searchParams.set('limit', String(limit));
 
@@ -565,8 +584,20 @@ async function fetchFromSupabaseRaw(limit = SUPABASE_LIMIT, lite = true): Promis
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
-async function fetchFromServerProxyRaw(limit = SUPABASE_LIMIT, lite = true): Promise<NewsItem[]> {
-  const res = await fetchWithTimeout(`/api/news_raw?limit=${limit}${lite ? '&lite=1' : ''}`);
+async function fetchFromServerProxyRaw(
+  limit = SUPABASE_LIMIT,
+  lite = true,
+  recentDays: number | null = DEFAULT_RECENT_DAYS,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<NewsItem[]> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  if (lite) params.set('lite', '1');
+  if (recentDays && recentDays > 0 && !dateFrom) params.set('recent_days', String(recentDays));
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  const res = await fetchWithTimeout(`/api/news_raw?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`proxy http ${res.status}`);
   }
@@ -577,15 +608,26 @@ async function fetchFromServerProxyRaw(limit = SUPABASE_LIMIT, lite = true): Pro
   return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
 }
 
-async function getSupabaseNewsCached(force = false, limit = SUPABASE_LIMIT, lite = true): Promise<NewsItem[]> {
-  if (limit !== SUPABASE_LIMIT || !lite) {
-    return hasSupabaseConfig() ? fetchFromSupabaseRaw(limit, lite) : fetchFromServerProxyRaw(limit, lite);
+async function getSupabaseNewsCached(
+  force = false,
+  limit = SUPABASE_LIMIT,
+  lite = true,
+  recentDays: number | null = DEFAULT_RECENT_DAYS,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<NewsItem[]> {
+  if (limit !== SUPABASE_LIMIT || !lite || recentDays !== DEFAULT_RECENT_DAYS || dateFrom || dateTo) {
+    return hasSupabaseConfig()
+      ? fetchFromSupabaseRaw(limit, lite, recentDays, dateFrom, dateTo)
+      : fetchFromServerProxyRaw(limit, lite, recentDays, dateFrom, dateTo);
   }
   const now = Date.now();
   if (!force && cache && now - cache.ts < 60_000) return cache.list;
   if (!force && cachePending) return cachePending;
 
-  const task = (hasSupabaseConfig() ? fetchFromSupabaseRaw(SUPABASE_LIMIT, true) : fetchFromServerProxyRaw(SUPABASE_LIMIT, true))
+  const task = (hasSupabaseConfig()
+    ? fetchFromSupabaseRaw(SUPABASE_LIMIT, true, DEFAULT_RECENT_DAYS)
+    : fetchFromServerProxyRaw(SUPABASE_LIMIT, true, DEFAULT_RECENT_DAYS))
     .then((list) => {
       cache = { ts: Date.now(), list };
       return list;
@@ -1121,9 +1163,16 @@ function buildScoreBreakdown(news: NewsItem[], scenario: RevenueScenario): Score
   };
 }
 
-async function getRealOrMockNews(force = false, limit = SUPABASE_LIMIT, lite = true): Promise<NewsItem[]> {
+async function getRealOrMockNews(
+  force = false,
+  limit = SUPABASE_LIMIT,
+  lite = true,
+  recentDays: number | null = DEFAULT_RECENT_DAYS,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<NewsItem[]> {
   try {
-    const list = await getSupabaseNewsCached(force, limit, lite);
+    const list = await getSupabaseNewsCached(force, limit, lite, recentDays, dateFrom, dateTo);
     return list.length > 0 ? list : fallbackNews();
   } catch (err) {
     if (!ALLOW_MOCK_FALLBACK) {
@@ -1152,7 +1201,17 @@ export const api = {
     await delay();
     const isLibraryHeavyQuery = (query.pageSize || 0) >= 1000;
     const requestedLimit = isLibraryHeavyQuery ? LIBRARY_FETCH_LIMIT : SUPABASE_LIMIT;
-    const list = filterNews(await getRealOrMockNews(false, requestedLimit, !isLibraryHeavyQuery), query);
+    const list = filterNews(
+      await getRealOrMockNews(
+        false,
+        requestedLimit,
+        !isLibraryHeavyQuery,
+        query.dateFrom || query.dateTo ? null : isLibraryHeavyQuery ? null : DEFAULT_RECENT_DAYS,
+        query.dateFrom,
+        query.dateTo
+      ),
+      query
+    );
     return paginate(list, query.page || 1, query.pageSize || 9);
   },
 

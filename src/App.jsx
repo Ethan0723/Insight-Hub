@@ -27,6 +27,7 @@ function App() {
   const [error, setError] = useState('');
 
   const [newsBase, setNewsBase] = useState([]);
+  const [selectedDateNews, setSelectedDateNews] = useState([]);
   const [insight, setInsight] = useState(null);
   const [matrix, setMatrix] = useState([]);
   const [meta, setMeta] = useState({ assistant: { samples: [], response: { affectedModules: [], strategy: [] } }, explainers: [] });
@@ -156,6 +157,29 @@ function App() {
   }, [selectedNewsId]);
 
   useEffect(() => {
+    if (!selectedBriefDate) return;
+    const nowUtc8 = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const threshold = new Date(nowUtc8.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (selectedBriefDate >= threshold) {
+      setSelectedDateNews([]);
+      return;
+    }
+
+    let mounted = true;
+    api
+      .getNews({ page: 1, pageSize: 200, dateFrom: selectedBriefDate, dateTo: selectedBriefDate })
+      .then((res) => {
+        if (mounted) setSelectedDateNews(res.list);
+      })
+      .catch(() => {
+        if (mounted) setSelectedDateNews([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [selectedBriefDate]);
+
+  useEffect(() => {
     if (fabPos.x !== null && fabPos.y !== null) return;
     const initialX = Math.max(12, window.innerWidth - 180);
     const initialY = Math.max(110, Math.round(window.innerHeight * 0.55));
@@ -197,9 +221,9 @@ function App() {
 
   const newsMap = useMemo(() => {
     const map = new Map();
-    newsBase.forEach((item) => map.set(item.id, item));
+    [...newsBase, ...selectedDateNews].forEach((item) => map.set(item.id, item));
     return map;
-  }, [newsBase]);
+  }, [newsBase, selectedDateNews]);
 
   const evidenceNews = useMemo(() => {
     const unique = [...new Set(evidenceData.newsIds)];
@@ -344,7 +368,7 @@ function App() {
             revenueScenario={scenario}
             onRevenueScenarioChange={onScenarioChange}
             onRevenueScenarioApply={onScenarioApply}
-            news={newsBase}
+            news={selectedDateNews.length > 0 ? selectedDateNews : newsBase}
             favorites={favorites}
             readIds={readIds}
             onToggleFavorite={onToggleFavorite}

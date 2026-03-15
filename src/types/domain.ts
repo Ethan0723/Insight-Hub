@@ -33,6 +33,7 @@ export interface NewsItem {
 export interface NewsQuery {
   page?: number;
   pageSize?: number;
+  recentDays?: number;
   keyword?: string;
   platforms?: string[];
   regions?: string[];
