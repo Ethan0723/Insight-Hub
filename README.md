@@ -259,7 +259,7 @@ python -m news_pipeline.daily_brief
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_USE_SUPABASE`
 - `VITE_SUPABASE_NEWS_LIMIT`
-- `VITE_GA_ID`（GA4 Measurement ID，默认 `G-Z3L1ZHWP09`）
+- `VITE_GA_ID`（GA4 Measurement ID）
 - `VITE_AI_API_BASE`（前后端分域部署时必填）
 
 ### 8.2 Node 服务
