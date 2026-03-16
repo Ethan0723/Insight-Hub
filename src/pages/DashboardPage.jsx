@@ -27,6 +27,8 @@ function DashboardPage({
   selectedBriefDate,
   onSelectedBriefDateChange,
   matrix,
+  matrixRange,
+  onMatrixRangeChange,
   explainers,
   revenueResult,
   scoreBreakdown,
@@ -98,7 +100,13 @@ function DashboardPage({
       </div>
 
       <div id="matrix" className="scroll-mt-24">
-        <CompetitionMatrix rows={matrix} onOpenEvidence={onOpenEvidence} onOpenLibraryByIds={onOpenLibraryByIds} />
+        <CompetitionMatrix
+          rows={matrix}
+          range={matrixRange}
+          onRangeChange={onMatrixRangeChange}
+          onOpenEvidence={onOpenEvidence}
+          onOpenLibraryByIds={onOpenLibraryByIds}
+        />
       </div>
 
       <ModelExplainPanel explainers={explainers} />

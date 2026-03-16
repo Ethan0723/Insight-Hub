@@ -53,8 +53,22 @@ function NewsLibraryPage({
     setLowPage(1);
   }, [initialQuery]);
 
+  const isLowConfidenceNoise = (item) => {
+    const text = `${item?.title || ''} ${item?.aiTldr || ''} ${item?.summary || ''}`.toLowerCase();
+    return (
+      text.includes('信息不足') ||
+      text.includes('判断置信度较低') ||
+      text.includes('置信度极低') ||
+      text.includes('json 修复失败') ||
+      text.includes('json修复失败') ||
+      text.includes('模型输出缺失字段') ||
+      text.includes('(待翻译)') ||
+      text.includes('low confidence')
+    );
+  };
+
   const applyLocalFilters = (list) => {
-    let result = [...list];
+    let result = [...list].filter((item) => !isLowConfidenceNoise(item));
     if (query.ids && query.ids.length > 0) {
       const set = new Set(query.ids);
       result = result.filter((item) => set.has(item.id));

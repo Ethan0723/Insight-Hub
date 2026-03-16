@@ -15,6 +15,11 @@ const defaultScenario = {
   paymentSuccessDelta: 0
 };
 const CORE_SNAPSHOT_KEY = 'sse:core-snapshot:v1';
+function utc8DateKey(offsetDays = 0) {
+  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  now.setUTCDate(now.getUTCDate() + offsetDays);
+  return now.toISOString().slice(0, 10);
+}
 
 function readCoreSnapshot() {
   try {
@@ -39,9 +44,12 @@ function writeCoreSnapshot(payload) {
 
 function App() {
   const [selectedBriefDate, setSelectedBriefDate] = useState(() => {
-    const utc8Now = new Date(Date.now() + 8 * 60 * 60 * 1000);
-    return utc8Now.toISOString().slice(0, 10);
+    return utc8DateKey(0);
   });
+  const [matrixRange, setMatrixRange] = useState(() => ({
+    from: utc8DateKey(-6),
+    to: utc8DateKey(0)
+  }));
   const [activeNav, setActiveNav] = useState('overview');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
@@ -110,7 +118,7 @@ function App() {
       Promise.allSettled([
         withTimeout(api.getNews({ page: 1, pageSize: 200 }), 15000),
         withTimeout(api.getDailyInsight(), 15000),
-        withTimeout(api.getMatrix(), 15000),
+        withTimeout(api.getMatrix({ dateFrom: matrixRange.from, dateTo: matrixRange.to }), 15000),
         withTimeout(api.getAppMeta(), 15000)
       ])
         .then((results) => {
@@ -181,6 +189,22 @@ function App() {
       if (retryTimer) window.clearTimeout(retryTimer);
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      try {
+        const rows = await api.getMatrix({ dateFrom: matrixRange.from, dateTo: matrixRange.to });
+        if (mounted) setMatrix(rows);
+      } catch {
+        // keep existing matrix
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, [matrixRange.from, matrixRange.to]);
 
   useEffect(() => {
     const basePath = window.location.pathname || '/';
@@ -458,6 +482,8 @@ function App() {
             selectedBriefDate={selectedBriefDate}
             onSelectedBriefDateChange={setSelectedBriefDate}
             matrix={matrix}
+            matrixRange={matrixRange}
+            onMatrixRangeChange={setMatrixRange}
             explainers={meta.explainers}
             revenueResult={revenueResult}
             scoreBreakdown={scoreBreakdown}

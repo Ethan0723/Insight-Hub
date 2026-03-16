@@ -1,4 +1,15 @@
-function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
+function utc8Today() {
+  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return now.toISOString().slice(0, 10);
+}
+
+function shiftUtc8Days(days) {
+  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  now.setUTCDate(now.getUTCDate() + days);
+  return now.toISOString().slice(0, 10);
+}
+
+function CompetitionMatrix({ rows, range, onRangeChange, onOpenEvidence, onOpenLibraryByIds }) {
   const targetPlatforms = ['Shopify', 'Amazon', 'TikTok Shop'];
   const platformSet = new Set(targetPlatforms);
   const incomingRows = (Array.isArray(rows) ? rows : []).filter((item) => platformSet.has(item?.name));
@@ -23,9 +34,38 @@ function CompetitionMatrix({ rows, onOpenEvidence, onOpenLibraryByIds }) {
     <section className="rounded-3xl border border-indigo-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">竞争动态矩阵</h2>
-        <span className="rounded-full border border-indigo-300/30 bg-indigo-300/10 px-3 py-1 text-xs text-indigo-200">
-          可溯源竞争情报
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onRangeChange({ from: shiftUtc8Days(-6), to: utc8Today() })}
+            className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:border-cyan-300/40"
+          >
+            近7天
+          </button>
+          <button
+            type="button"
+            onClick={() => onRangeChange({ from: shiftUtc8Days(-14), to: utc8Today() })}
+            className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:border-cyan-300/40"
+          >
+            近15天
+          </button>
+          <input
+            type="date"
+            value={range?.from || ''}
+            onChange={(e) => onRangeChange({ ...(range || {}), from: e.target.value })}
+            className="rounded-md border border-slate-700 bg-slate-900/85 px-1.5 py-0.5 text-[11px] text-slate-200"
+          />
+          <span className="text-xs text-slate-400">至</span>
+          <input
+            type="date"
+            value={range?.to || ''}
+            onChange={(e) => onRangeChange({ ...(range || {}), to: e.target.value })}
+            className="rounded-md border border-slate-700 bg-slate-900/85 px-1.5 py-0.5 text-[11px] text-slate-200"
+          />
+          <span className="rounded-full border border-indigo-300/30 bg-indigo-300/10 px-3 py-1 text-xs text-indigo-200">
+            可溯源竞争情报
+          </span>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-700/70">

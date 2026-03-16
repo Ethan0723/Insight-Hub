@@ -1358,10 +1358,20 @@ export const api = {
     return brief;
   },
 
-  async getMatrix(): Promise<MatrixRow[]> {
+  async getMatrix(params: { dateFrom?: string; dateTo?: string; recentDays?: number } = {}): Promise<MatrixRow[]> {
     await delay(150);
+    const { dateFrom, dateTo, recentDays = 7 } = params;
     try {
-      return buildMatrix(await getRealOrMockNews());
+      return buildMatrix(
+        await getRealOrMockNews(
+          false,
+          SUPABASE_LIMIT,
+          true,
+          dateFrom || dateTo ? null : recentDays,
+          dateFrom,
+          dateTo
+        )
+      );
     } catch (err) {
       console.warn('[api] getMatrix failed, fallback to mock matrix.', err);
       return mockMatrix;
