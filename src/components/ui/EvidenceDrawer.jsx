@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { streamNewsSummary } from '../../services/ai';
 import { track } from '../../lib/analytics';
 
@@ -15,17 +15,25 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
     }
   }, [open]);
 
+  const sortedNewsList = useMemo(() => {
+    return [...(Array.isArray(newsList) ? newsList : [])].sort((a, b) => {
+      const bTs = Date.parse(b?.createdAt || b?.publishDate || '') || 0;
+      const aTs = Date.parse(a?.createdAt || a?.publishDate || '') || 0;
+      return bTs - aTs;
+    });
+  }, [newsList]);
+
   if (!open) return null;
 
   const onGenerateSummary = async () => {
-    if (!newsList.length || loadingSummary) return;
+    if (!sortedNewsList.length || loadingSummary) return;
     setSummary('');
     setSummaryError('');
     setLoadingSummary(true);
 
     try {
       await streamNewsSummary(
-        newsList
+        sortedNewsList
           .map((item) => ({
             title: item.title,
             summary: item.summary || item.aiTldr || ''
@@ -46,17 +54,17 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-slate-950/70" onClick={onClose} />
-      <aside className="absolute right-0 top-0 h-full w-full max-w-2xl animate-[slideIn_220ms_ease-out] overflow-y-auto border-l border-cyan-300/20 bg-slate-950/95 p-5 backdrop-blur-xl">
+      <div className="app-overlay absolute inset-0" onClick={onClose} />
+      <aside className="app-drawer absolute right-0 top-0 h-full w-full max-w-2xl animate-[slideIn_220ms_ease-out] overflow-y-auto p-5 backdrop-blur-xl">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-semibold text-slate-100">证据溯源</h3>
-            <p className="text-xs text-slate-400">{title}</p>
+            <h3 className="app-text-primary text-lg font-semibold">证据溯源</h3>
+            <p className="app-text-muted text-xs">{title}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
+            className="rounded-lg app-button-secondary px-3 py-1 text-xs"
           >
             关闭
           </button>
@@ -65,45 +73,45 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
         <div className="mb-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => onOpenLibraryByIds(newsList.map((item) => item.id))}
-            className="rounded-lg border border-cyan-300/40 bg-cyan-300/10 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-300/20"
+            onClick={() => onOpenLibraryByIds(sortedNewsList.map((item) => item.id))}
+            className="app-accent-chip rounded-lg px-3 py-1.5 text-xs hover:bg-cyan-300/20"
           >
             在新闻库中查看这些引用新闻
           </button>
           <button
             type="button"
             onClick={onGenerateSummary}
-            disabled={!newsList.length || loadingSummary}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!sortedNewsList.length || loadingSummary}
+            className="rounded-lg app-button-secondary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loadingSummary ? '生成中...' : '生成 AI 摘要'}
           </button>
         </div>
 
         {summary || summaryError ? (
-          <div className="mb-4 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-3">
-            <p className="mb-2 text-xs text-cyan-200">AI 聚合摘要</p>
+          <div className="app-accent-panel mb-4 rounded-xl p-3">
+            <p className="app-accent-text mb-2 text-xs">AI 聚合摘要</p>
             {summary ? <p className="text-sm leading-6 text-slate-100">{summary}</p> : null}
             {summaryError ? <p className="text-xs text-rose-300">{summaryError}</p> : null}
           </div>
         ) : null}
 
         <div className="space-y-3">
-          {newsList.length === 0 ? (
-            <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-400">暂无引用新闻</div>
+          {sortedNewsList.length === 0 ? (
+            <div className="app-card rounded-xl p-4 text-sm app-text-muted">暂无引用新闻</div>
           ) : (
-            newsList.map((news) => (
-              <article key={news.id} className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4">
-                <p className="text-xs text-slate-400">
+            sortedNewsList.map((news) => (
+              <article key={news.id} className="app-card rounded-xl p-4">
+                <p className="app-text-muted text-xs">
                   {news.source} · {news.publishDate} · 贡献分 {Math.max(30, Math.round(news.impactScore * 0.88))}
                 </p>
-                <h4 className="mt-2 text-sm font-medium text-slate-100">{news.title}</h4>
-                <p className="mt-2 text-xs text-slate-300 line-clamp-2">{news.aiTldr}</p>
+                <h4 className="app-text-primary mt-2 text-sm font-medium">{news.title}</h4>
+                <p className="app-text-secondary mt-2 text-xs line-clamp-2">{news.aiTldr}</p>
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    onClick={() => onOpenNews(news.id)}
-                    className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-cyan-400"
+                    onClick={() => onOpenNews(news)}
+                    className="app-button-primary rounded-lg px-3 py-1.5 text-xs font-medium"
                   >
                     查看详情
                   </button>
@@ -120,7 +128,7 @@ function EvidenceDrawer({ open, title, newsList, onClose, onOpenNews, onOpenLibr
                       }
                       track('citation_click', { news_id: String(news?.id || ''), domain });
                     }}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+                    className="rounded-lg app-button-secondary px-3 py-1.5 text-xs"
                   >
                     打开原文
                   </a>

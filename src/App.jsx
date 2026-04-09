@@ -422,6 +422,16 @@ function App() {
     setEvidenceOpen(false);
   };
 
+  const onOpenNewsFromEvidence = (newsOrId) => {
+    if (newsOrId && typeof newsOrId === 'object') {
+      setSelectedNews(newsOrId);
+      setSelectedNewsId(newsOrId.id ?? null);
+    } else {
+      setSelectedNewsId(newsOrId);
+    }
+    setEvidenceOpen(false);
+  };
+
   const onToggleFavorite = (id) => {
     setFavorites(storage.toggleFavorite(id));
   };
@@ -565,7 +575,7 @@ function App() {
         title={evidenceData.title}
         newsList={evidenceNews}
         onClose={() => setEvidenceOpen(false)}
-        onOpenNews={setSelectedNewsId}
+        onOpenNews={onOpenNewsFromEvidence}
         onOpenLibraryByIds={onOpenLibraryByIds}
       />
 
