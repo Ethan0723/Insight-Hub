@@ -12,6 +12,48 @@ const FIXED_SAMPLE_QUESTIONS = [
   { id: 'q3', text: '在当前判断下，最容易被低估的风险是什么？' }
 ];
 
+function clampDays(value, min = 1, max = 180) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parseRangeDays(question) {
+  const text = String(question || '').trim();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const monthSinceMatch = text.match(/(?:(\d{4})年)?\s*(\d{1,2})月(?:份)?以来/);
+  if (monthSinceMatch) {
+    const year = Number(monthSinceMatch[1] || currentYear);
+    const month = Number(monthSinceMatch[2]);
+    if (month >= 1 && month <= 12) {
+      const start = new Date(year, month - 1, 1);
+      const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      return clampDays(diffDays);
+    }
+  }
+
+  if (/本月以来|这个月以来|当月以来/.test(text)) {
+    const start = new Date(currentYear, now.getMonth(), 1);
+    const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return clampDays(diffDays);
+  }
+
+  const dayMatch = text.match(/近\s*(\d{1,3})\s*天|最近\s*(\d{1,3})\s*天|过去\s*(\d{1,3})\s*天/);
+  if (dayMatch) {
+    return clampDays(Number(dayMatch[1] || dayMatch[2] || dayMatch[3] || 3));
+  }
+
+  const monthMatch = text.match(/近\s*(\d{1,2})\s*个?月|最近\s*(\d{1,2})\s*个?月|过去\s*(\d{1,2})\s*个?月/);
+  if (monthMatch) {
+    return clampDays(Number(monthMatch[1] || monthMatch[2] || monthMatch[3] || 1) * 30);
+  }
+
+  if (/一周|近7天|最近7天|过去7天|7天/.test(text)) return 7;
+  if (/近3天|最近3天|过去3天|三天/.test(text)) return 3;
+  if (/今天|今日/.test(text)) return 1;
+  return null;
+}
+
 function sanitizePlainText(text) {
   return String(text || '')
     .replace(/\r/g, '')
@@ -108,13 +150,13 @@ function renderSections(message) {
   if (!sections.length) return renderParagraphs(message.text || '');
   return (
     <div className="space-y-2">
-      {message.title ? <p className="text-sm font-semibold text-cyan-100">{message.title}</p> : null}
+      {message.title ? <p className="app-accent-text text-sm font-semibold">{message.title}</p> : null}
       {sections.map((section, idx) => (
-        <article key={`${section.heading}-${idx}`} className="rounded-lg border border-slate-700/70 bg-slate-950/45 p-2">
-          <p className="text-xs font-semibold text-slate-200">{section.heading}</p>
+        <article key={`${section.heading}-${idx}`} className="app-card-soft rounded-lg p-2">
+          <p className="app-text-primary text-xs font-semibold">{section.heading}</p>
           <div className="mt-1 space-y-1">
             {section.bullets.map((bullet, bIdx) => (
-              <p key={`${idx}-${bIdx}`} className="text-sm text-slate-100 leading-[1.6]">
+              <p key={`${idx}-${bIdx}`} className="app-text-primary text-sm leading-[1.6]">
                 {bIdx + 1}. {bullet}
               </p>
             ))}
@@ -131,28 +173,28 @@ function AssistantBubble({ message, onOpenEvidence }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[88%] rounded-2xl border border-cyan-300/40 bg-cyan-500/15 px-3 py-2 text-sm text-cyan-100">{message.text}</div>
+        <div className="app-accent-chip max-w-[88%] rounded-2xl px-3 py-2 text-sm font-medium">{message.text}</div>
       </div>
     );
   }
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[92%] rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-3 text-sm text-slate-100">
-        <div className="mb-2 flex items-center gap-2 text-xs text-cyan-300">
+      <div className="app-card max-w-[92%] rounded-2xl px-3 py-3 text-sm app-text-primary">
+        <div className="app-accent-text mb-2 flex items-center gap-2 text-xs">
           <span>🤖 AI 助手</span>
-          {message.pending ? <span className="text-slate-400">生成中...</span> : null}
+          {message.pending ? <span className="app-text-muted">生成中...</span> : null}
         </div>
 
-        <div className="space-y-2.5 text-sm leading-[1.62] text-slate-100">
+        <div className="space-y-2.5 text-sm leading-[1.62] app-text-primary">
           {message.pending && !message.text
             ? renderParagraphs('正在模拟不同决策路径的风险与收益…')
             : renderSections(message)}
         </div>
 
         {Array.isArray(message.sources) && message.sources.length > 0 ? (
-          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/40 p-2">
-            <p className="mb-1 text-[11px] text-cyan-200">引用来源</p>
+          <div className="app-card-soft mt-3 rounded-lg p-2">
+            <p className="app-accent-text mb-1 text-[11px]">引用来源</p>
             <div className="space-y-1">
               {message.sources.map((src, idx) => (
                 <a
@@ -169,7 +211,7 @@ function AssistantBubble({ message, onOpenEvidence }) {
                     }
                     track('citation_click', { domain });
                   }}
-                  className="block text-[11px] text-slate-300 hover:text-cyan-200"
+                  className="app-text-secondary block text-[11px] hover:text-cyan-200"
                 >
                   [{idx + 1}] {src.published_at || ''} {src.source || ''} {src.title}
                 </a>
@@ -185,14 +227,14 @@ function AssistantBubble({ message, onOpenEvidence }) {
             <button
               type="button"
               onClick={() => setShowStructure((v) => !v)}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+              className="rounded-lg app-button-secondary px-3 py-1.5 text-xs"
             >
               {showStructure ? '收起推理结构' : '查看推理结构'}
             </button>
 
             {showStructure ? (
-              <div className="mt-3 space-y-3 rounded-xl border border-slate-700 bg-slate-950/60 p-3">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-300 space-y-2">
+              <div className="app-card mt-3 space-y-3 rounded-xl p-3">
+                <div className="app-card-soft rounded-lg p-3 text-xs app-text-secondary space-y-2">
                   <p>意图识别：{message.reasoningView.intent || '-'}</p>
                   <p>时间窗口：{message.reasoningView.time_range || '-'}</p>
                   <p>
@@ -204,7 +246,7 @@ function AssistantBubble({ message, onOpenEvidence }) {
                   ) : null}
                   {Array.isArray(message.reasoningView.synthesis_steps) && message.reasoningView.synthesis_steps.length ? (
                     <div>
-                      <p className="text-cyan-200">生成步骤：</p>
+                      <p className="app-accent-text">生成步骤：</p>
                       <div className="mt-1 space-y-1">
                         {message.reasoningView.synthesis_steps.map((step, idx) => (
                           <p key={`${step}-${idx}`}>{idx + 1}. {step}</p>
@@ -223,7 +265,7 @@ function AssistantBubble({ message, onOpenEvidence }) {
                         newsIds: message.sources.map((s) => s.news_id).filter(Boolean)
                       })
                     }
-                    className="rounded-lg border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+                    className="rounded-lg app-button-secondary px-2 py-1 text-[11px]"
                   >
                     查看证据新闻
                   </button>
@@ -291,15 +333,15 @@ function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
     try {
       let mode = 'auto';
       let rangeDays = 3;
-      if (/近7天|最近7天|过去7天|一周|7天/.test(question)) {
-        mode = 'news_summary';
-        rangeDays = 7;
-      } else if (/近3天|最近3天|过去3天|三天|总结|汇总|盘点|扫描/.test(question)) {
-        mode = 'news_summary';
-        rangeDays = 3;
-      } else if (/今天|今日/.test(question)) {
+      const explicitRangeDays = parseRangeDays(question);
+      if (explicitRangeDays != null) {
+        rangeDays = explicitRangeDays;
+      }
+
+      if (/今天|今日/.test(question)) {
         mode = 'brief_today';
-        rangeDays = 1;
+      } else if (rangeDays > 1 && /总结|汇总|盘点|扫描|新闻|动态|回顾/.test(question)) {
+        mode = 'news_summary';
       }
 
       const payload = await askAiChatV2({
@@ -354,17 +396,17 @@ function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
 
   return (
     <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-slate-950/70" onClick={onClose} />
-      <aside className="absolute right-0 top-0 h-full w-full max-w-md animate-[slideIn_220ms_ease-out] border-l border-cyan-300/20 bg-slate-950/95 p-5 backdrop-blur-xl">
+      <div className="app-overlay absolute inset-0" onClick={onClose} />
+      <aside className="app-drawer absolute right-0 top-0 h-full w-full max-w-md animate-[slideIn_220ms_ease-out] p-5 backdrop-blur-xl">
         <div className="mb-2 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-100">🧠 Insight Copilot</h3>
-            <p className="mt-0.5 text-xs text-slate-400">基于全球信号生成可执行决策</p>
+            <h3 className="app-text-primary text-lg font-semibold">🧠 Insight Copilot</h3>
+            <p className="app-text-muted mt-0.5 text-xs">基于全球信号生成可执行决策</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
+            className="rounded-lg app-button-secondary px-3 py-1 text-xs"
           >
             关闭
           </button>
@@ -377,7 +419,7 @@ function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
                 key={question.id}
                 type="button"
                 onClick={() => submitQuestion(question.text, { isSample: true, sampleId: question.id })}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-left text-xs text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200"
+                className="app-card w-full rounded-xl px-3 py-2 text-left text-xs app-text-secondary transition hover:border-cyan-300/40 hover:text-cyan-200"
               >
                 {question.text}
               </button>
@@ -390,7 +432,7 @@ function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
             ))}
           </div>
 
-          <div className="mt-5 flex gap-2 rounded-xl border border-slate-700 bg-slate-950/60 p-2">
+          <div className="app-card mt-5 flex gap-2 rounded-xl p-2">
             <input
               type="text"
               value={input}
@@ -399,12 +441,12 @@ function AIAssistantPanel({ open, onClose, onOpenEvidence }) {
                 if (e.key === 'Enter') submitQuestion(input);
               }}
               placeholder="输入你的战略问题..."
-              className="w-full bg-transparent px-2 text-sm text-slate-200 outline-none placeholder:text-slate-500"
+              className="w-full bg-transparent px-2 text-sm app-text-primary outline-none placeholder:text-slate-500"
             />
             <button
               type="button"
               onClick={() => submitQuestion(input)}
-              className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-medium text-slate-950 hover:bg-cyan-400"
+              className="app-button-primary rounded-lg px-3 py-2 text-xs font-medium"
             >
               发送
             </button>

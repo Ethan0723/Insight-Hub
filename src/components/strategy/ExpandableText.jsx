@@ -26,7 +26,7 @@ function ExpandableText({ text, collapsedChars = 160, defaultExpanded = false, c
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[11px] text-cyan-200 underline-offset-4 hover:underline"
+          className="app-accent-text mt-1 text-[11px] underline-offset-4 hover:underline"
         >
           {expanded ? "收起" : "展开全文"}
         </button>

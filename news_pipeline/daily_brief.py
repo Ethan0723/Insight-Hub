@@ -13,6 +13,8 @@ from .supabase_client import fetch_latest_daily_brief_by_date, fetch_news_raw_fo
 UTC8 = timezone(timedelta(hours=8))
 PROMPT_VERSION = os.getenv("DAILY_BRIEF_PROMPT_VERSION", "v1")
 DAILY_BRIEF_TZ = os.getenv("DAILY_BRIEF_TZ", "Asia/Shanghai")
+TARGET_BRIEF_DATE = os.getenv("DAILY_BRIEF_TARGET_DATE", "").strip()
+FORCE_OVERWRITE = os.getenv("DAILY_BRIEF_FORCE_OVERWRITE", "false").strip().lower() in {"1", "true", "yes"}
 MAX_NEWS = int(os.getenv("DAILY_BRIEF_MAX_NEWS", "50"))
 FETCH_LIMIT = int(os.getenv("DAILY_BRIEF_FETCH_LIMIT", "120"))
 LLM_MAX_TOKENS = int(os.getenv("DAILY_BRIEF_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "1500")))
@@ -36,10 +38,13 @@ _BLOCKED_ONE_LINER_PREFIXES = (
 )
 
 
-def _utc8_window(now_utc: datetime | None = None) -> tuple[str, datetime, datetime]:
+def _utc8_window(now_utc: datetime | None = None, target_date: str | None = None) -> tuple[str, datetime, datetime]:
     now_utc = now_utc or datetime.now(timezone.utc)
-    now_local = now_utc.astimezone(UTC8)
-    day_local = now_local.date()
+    if target_date:
+        day_local = datetime.fromisoformat(f"{target_date}T00:00:00+08:00").date()
+    else:
+        now_local = now_utc.astimezone(UTC8)
+        day_local = now_local.date()
     start_local = datetime.combine(day_local, datetime.min.time(), tzinfo=UTC8)
     end_local = start_local + timedelta(days=1)
     return day_local.isoformat(), start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
@@ -60,6 +65,15 @@ def _parse_json_obj(raw: Any) -> dict[str, Any]:
 
 def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_url_for_dedupe(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"^https?://", "", text)
+    text = text.split("?", 1)[0].rstrip("/")
+    return text
 
 
 def _truncate_for_prompt(value: Any, limit: int) -> str:
@@ -133,6 +147,50 @@ def _norm_for_similarity(text: str) -> str:
     lowered = re.sub(r"https?://\S+", " ", lowered)
     lowered = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
     return lowered.strip()
+
+
+def _is_duplicate_candidate(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    url_a = _normalize_url_for_dedupe(a.get("url"))
+    url_b = _normalize_url_for_dedupe(b.get("url"))
+    if url_a and url_b and url_a == url_b:
+        return True
+
+    title_a = _norm_for_similarity(str(a.get("title") or ""))
+    title_b = _norm_for_similarity(str(b.get("title") or ""))
+    if not title_a or not title_b:
+        return False
+
+    title_ratio = SequenceMatcher(None, title_a, title_b).ratio()
+    summary_a = _norm_for_similarity(f"{a.get('title', '')} {a.get('summary', '')}")
+    summary_b = _norm_for_similarity(f"{b.get('title', '')} {b.get('summary', '')}")
+    summary_ratio = SequenceMatcher(None, summary_a, summary_b).ratio() if summary_a and summary_b else 0.0
+    same_platform = (
+        str(a.get("platform") or "Global") == str(b.get("platform") or "Global")
+        or "Global" in {str(a.get("platform") or "Global"), str(b.get("platform") or "Global")}
+    )
+    same_region = (
+        str(a.get("region") or "Global") == str(b.get("region") or "Global")
+        or "Global" in {str(a.get("region") or "Global"), str(b.get("region") or "Global")}
+    )
+    return same_platform and same_region and (title_ratio >= 0.78 or summary_ratio >= 0.72)
+
+
+def _dedupe_input_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    for item in items:
+        hit_index = next((idx for idx, existing in enumerate(deduped) if _is_duplicate_candidate(existing, item)), -1)
+        if hit_index < 0:
+            deduped.append(item)
+            continue
+
+        existing = deduped[hit_index]
+        existing_score = int(existing.get("impact_score") or 0)
+        current_score = int(item.get("impact_score") or 0)
+        existing_created = str(existing.get("publish_time") or existing.get("created_at") or "")
+        current_created = str(item.get("publish_time") or item.get("created_at") or "")
+        if current_score > existing_score or (current_score == existing_score and current_created >= existing_created):
+            deduped[hit_index] = item
+    return deduped
 
 
 def _headline_too_close_to_news(headline: str, input_news: list[dict[str, Any]]) -> bool:
@@ -303,6 +361,15 @@ def _extract_existing_quality(existing_row: dict[str, Any]) -> int:
         return 0
 
 
+def _extract_existing_max_impact(existing_row: dict[str, Any]) -> int:
+    stats = _as_dict(existing_row.get("stats"))
+    value = stats.get("max_impact_score")
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
     tags: list[str] = []
 
@@ -362,6 +429,7 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             impact_score = 0
 
         created_at_raw = str(row.get("created_at") or "")
+        publish_time_raw = str(row.get("publish_time") or "")
         candidates.append(
             {
                 "id": str(row.get("id") or "").strip(),
@@ -379,6 +447,7 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 or "Global",
                 "tags": tags,
                 "created_at": created_at_raw,
+                "publish_time": publish_time_raw,
             }
         )
 
@@ -407,12 +476,12 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return 0
 
     sorted_rows = sorted(
-        candidates,
+        _dedupe_input_news(candidates),
         key=lambda item: (
             RISK_WEIGHT.get(str(item.get("risk_level")), 2),
             int(item.get("impact_score") or 0),
             relevance_score(item),
-            parse_created(str(item.get("created_at") or "")),
+            parse_created(str(item.get("publish_time") or item.get("created_at") or "")),
         ),
         reverse=True,
     )
@@ -616,6 +685,7 @@ def _normalize_brief(
     citations = _clean_citations(raw.get("citations"), input_news)
     high_risk = sum(1 for item in input_news if item.get("risk_level") == "高")
     high_impact = sum(1 for item in input_news if int(item.get("impact_score") or 0) >= HIGH_IMPACT_THRESHOLD)
+    max_impact_score = max([int(item.get("impact_score") or 0) for item in input_news], default=0)
 
     stats_raw = raw.get("stats") if isinstance(raw.get("stats"), dict) else {}
     stats = {
@@ -623,6 +693,7 @@ def _normalize_brief(
         "used": int(stats_raw.get("used") or len(input_news)),
         "high_risk": int(stats_raw.get("high_risk") or high_risk),
         "high_impact": int(stats_raw.get("high_impact") or high_impact),
+        "max_impact_score": int(stats_raw.get("max_impact_score") or max_impact_score),
     }
 
     return {
@@ -664,7 +735,7 @@ def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: 
 
 def generate_daily_brief() -> dict[str, Any]:
     now_utc = datetime.now(timezone.utc)
-    brief_date, window_start, window_end = _utc8_window(now_utc)
+    brief_date, window_start, window_end = _utc8_window(now_utc, TARGET_BRIEF_DATE or None)
     raw_rows = fetch_news_raw_for_daily_brief(
         window_start_iso=window_start.isoformat(),
         window_end_iso=window_end.isoformat(),
@@ -739,11 +810,17 @@ def generate_daily_brief() -> dict[str, Any]:
     write_error = ""
     skipped_by_quality_guard = False
     existing_quality = 0
+    existing_max_impact = 0
     try:
         existing = fetch_latest_daily_brief_by_date(brief_date=brief_date, prompt_version=PROMPT_VERSION)
         if existing:
             existing_quality = _extract_existing_quality(existing)
-            if existing_quality >= new_quality + QUALITY_GUARD_DELTA:
+            existing_max_impact = _extract_existing_max_impact(existing)
+            new_max_impact = int(_as_dict(row.get("stats")).get("max_impact_score") or 0)
+            should_replace = (
+                new_max_impact > existing_max_impact and new_quality >= existing_quality + QUALITY_GUARD_DELTA
+            )
+            if not should_replace and not FORCE_OVERWRITE:
                 skipped_by_quality_guard = True
                 inserted = existing
             else:
@@ -770,6 +847,8 @@ def generate_daily_brief() -> dict[str, Any]:
         "fallback_used": fallback_used,
         "quality_score": new_quality,
         "existing_quality": existing_quality,
+        "max_impact_score": int(_as_dict(row.get("stats")).get("max_impact_score") or 0),
+        "existing_max_impact": existing_max_impact,
         "skipped_by_quality_guard": skipped_by_quality_guard,
     }
 
@@ -785,7 +864,9 @@ def main() -> None:
     print(f"[DAILY_BRIEF] one_liner={result['one_liner']}")
     print(f"[DAILY_BRIEF] citations={result['citations_count']} fallback={result['fallback_used']}")
     print(
-        f"[DAILY_BRIEF] quality=new:{result['quality_score']} old:{result['existing_quality']} skipped={result['skipped_by_quality_guard']}"
+        f"[DAILY_BRIEF] quality=new:{result['quality_score']} old:{result['existing_quality']} "
+        f"impact=new:{result['max_impact_score']} old:{result['existing_max_impact']} "
+        f"skipped={result['skipped_by_quality_guard']}"
     )
     if result.get("write_error"):
         print(f"[DAILY_BRIEF] write_error={result['write_error']}")

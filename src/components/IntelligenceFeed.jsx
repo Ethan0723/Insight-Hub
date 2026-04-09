@@ -2,10 +2,10 @@ import StrategicNewsCard from './StrategicNewsCard';
 
 function IntelligenceFeed({ news, favorites, readIds, onToggleFavorite, onOpenDetail }) {
   return (
-    <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+    <section className="app-section rounded-3xl p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">📡 战略输入情报流</h2>
-        <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-200">
+        <h2 className="app-text-primary text-xl font-semibold lg:text-2xl">战略输入情报流</h2>
+        <span className="app-accent-chip rounded-full px-3 py-1 text-xs">
           High Impact {news.length} 条
         </span>
       </div>

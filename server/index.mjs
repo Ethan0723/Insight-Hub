@@ -256,6 +256,40 @@ function clamp(num, min, max) {
   return Math.min(Math.max(Number(num) || 0, min), max);
 }
 
+function inferRangeDaysFromQuery(query) {
+  const text = sanitizeLine(query);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const monthSinceMatch = text.match(/(?:(\d{4})年)?\s*(\d{1,2})月(?:份)?以来/);
+  if (monthSinceMatch) {
+    const year = Number(monthSinceMatch[1] || currentYear);
+    const month = Number(monthSinceMatch[2]);
+    if (month >= 1 && month <= 12) {
+      const start = new Date(year, month - 1, 1);
+      const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      return clamp(diffDays, 1, 180);
+    }
+  }
+
+  if (/本月以来|这个月以来|当月以来/.test(text)) {
+    const start = new Date(currentYear, now.getMonth(), 1);
+    const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return clamp(diffDays, 1, 180);
+  }
+
+  const dayMatch = text.match(/(?:近|最近|过去)\s*(\d{1,3})\s*天/);
+  if (dayMatch) return clamp(Number(dayMatch[1] || 3), 1, 180);
+
+  const monthMatch = text.match(/(?:近|最近|过去)\s*(\d{1,2})\s*个?月/);
+  if (monthMatch) return clamp(Number(monthMatch[1] || 1) * 30, 1, 180);
+
+  if (/一周|近7天|最近7天|过去7天|7天/.test(text)) return 7;
+  if (/近3天|最近3天|过去3天|三天/.test(text)) return 3;
+  if (/今天|今日/.test(text)) return 1;
+  return null;
+}
+
 function dedupeByUrl(rows) {
   const map = new Map();
   rows.forEach((row) => {
@@ -271,6 +305,35 @@ function dedupeByUrl(rows) {
     if (curTs > prevTs) map.set(key, row);
   });
   return Array.from(map.values());
+}
+
+const PLATFORM_ALIASES = {
+  shopify: ['shopify'],
+  amazon: ['amazon', '亚马逊'],
+  temu: ['temu'],
+  tiktok: ['tiktok', 'tik tok', 'tiktok shop', '抖音'],
+  shopline: ['shopline']
+};
+
+function detectPlatformFocus(query) {
+  const text = sanitizeLine(query).toLowerCase();
+  return Object.entries(PLATFORM_ALIASES)
+    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
+    .map(([platform]) => platform);
+}
+
+function applyPlatformFocus(ranked, query) {
+  const focusedPlatforms = detectPlatformFocus(query);
+  if (!focusedPlatforms.length) return ranked;
+
+  const matched = ranked.filter((item) => {
+    const haystack = `${item.title}\n${item.summary}\n${item.content}\n${item.source}\n${item.domain}`.toLowerCase();
+    return focusedPlatforms.some((platform) =>
+      (PLATFORM_ALIASES[platform] || []).some((alias) => haystack.includes(alias))
+    );
+  });
+
+  return matched.length > 0 ? matched : ranked;
 }
 
 function detectIntentByRule(query) {
@@ -595,8 +658,10 @@ function rankNewsHybrid({ query, candidates, expansion }) {
     };
   });
 
-  return dedupeByUrl(scored)
+  const ranked = dedupeByUrl(scored)
     .sort((a, b) => b.score - a.score || (Date.parse(b.published_at) || 0) - (Date.parse(a.published_at) || 0));
+
+  return applyPlatformFocus(ranked, query);
 }
 
 function buildContextFromSources(sources, maxN = 12) {
@@ -650,7 +715,30 @@ context 新闻：${JSON.stringify(contextSources)}
     maxTokens: 1500
   });
   const parsed = tryExtractJsonObject(content);
-  if (!parsed || typeof parsed !== 'object') throw new Error('invalid ai_chat_v2 json');
+  if (!parsed || typeof parsed !== 'object') {
+    const titles = contextSources.slice(0, 3).map((item) => item.title).filter(Boolean);
+    return {
+      answer: sanitizeLine(content) || `已检索到 ${contextSources.length} 条相关新闻，但模型输出格式不稳定；以下先按命中新闻给出保底摘要。`,
+      cards: {
+        headline: sanitizeLine(titles[0] || `${sanitizeLine(query)} 命中 ${contextSources.length} 条相关新闻`),
+        key_drivers: titles.slice(0, 3),
+        impacts: [
+          `时间窗口内共命中 ${retrieval?.returned ?? contextSources.length} 条相关信号`,
+          `检索策略为 ${sanitizeLine(retrieval?.strategy || 'hybrid')}`,
+          `建议结合引用来源继续核验关键结论`
+        ].filter(Boolean),
+        actions: [
+          {
+            priority: 'P1',
+            title: '复核引用新闻并确认关键结论',
+            why: '本次已完成检索，但模型输出格式异常，需先基于已命中来源做人工复核以避免误判',
+            owner_suggest: '数据分析团队',
+            timeframe: '24h'
+          }
+        ]
+      }
+    };
+  }
 
   const cards = parsed.cards && typeof parsed.cards === 'object' ? parsed.cards : {};
   return {
@@ -688,7 +776,8 @@ async function handleAiChatV2(req, res) {
     ? String(body.mode || 'auto')
     : 'auto';
   const topK = clamp(body?.top_k, 3, 20) || 12;
-  const requestedDays = clamp(body?.range_days, 1, 180) || (mode === 'news_summary' ? 7 : 3);
+  const inferredDays = inferRangeDaysFromQuery(query);
+  const requestedDays = inferredDays || clamp(body?.range_days, 1, 180) || (mode === 'news_summary' ? 7 : 3);
   const timezone = sanitizeLine(body?.timezone || '+08:00') || '+08:00';
 
   const intent = await detectIntentByLlm(query, mode);

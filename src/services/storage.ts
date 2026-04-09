@@ -4,7 +4,8 @@ const KEYS = {
   favorites: 'sse:favorites',
   read: 'sse:read-news',
   views: 'sse:saved-views',
-  brief: 'sse:brief-draft'
+  brief: 'sse:brief-draft',
+  theme: 'sse:theme'
 };
 
 function parse<T>(value: string | null, fallback: T): T {
@@ -17,6 +18,13 @@ function parse<T>(value: string | null, fallback: T): T {
 }
 
 export const storage = {
+  getTheme(): 'dark' | 'light' {
+    const value = localStorage.getItem(KEYS.theme);
+    return value === 'light' ? 'light' : 'dark';
+  },
+  setTheme(theme: 'dark' | 'light') {
+    localStorage.setItem(KEYS.theme, theme);
+  },
   getFavorites(): NewsId[] {
     return parse<NewsId[]>(localStorage.getItem(KEYS.favorites), []);
   },

@@ -360,30 +360,30 @@ function NewsLibraryPage({
 
   return (
     <section className="space-y-5">
-      <div className="rounded-3xl border border-cyan-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+      <div className="app-section rounded-3xl p-6 backdrop-blur-xl lg:p-8">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-100">Strategic News Library</h2>
-            <p className="mt-1 text-sm text-slate-400">可追溯检索系统 / Saved Views / 简报导出</p>
+            <h2 className="app-text-primary text-2xl font-semibold">Strategic News Library</h2>
+            <p className="app-text-muted mt-1 text-sm">可追溯检索系统 / Saved Views / 简报导出</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={saveCurrentView} type="button" className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40">
+            <button onClick={saveCurrentView} type="button" className="rounded-lg app-button-secondary px-3 py-1.5 text-xs">
               保存筛选视图
             </button>
-            <button onClick={createMarkdownBrief} type="button" className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-cyan-400">
+            <button onClick={createMarkdownBrief} type="button" className="app-button-primary rounded-lg px-3 py-1.5 text-xs font-medium">
               导出为简报
             </button>
           </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">总新闻数量</p><p className="mt-2 text-2xl text-cyan-200">{stats.total}</p></div>
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">高风险数量</p><p className="mt-2 text-2xl text-rose-300">{stats.highRisk}</p></div>
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">本周新增数量</p><p className="mt-2 text-2xl text-emerald-300">{stats.thisWeek}</p></div>
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">平均影响评分</p><p className="mt-2 text-2xl text-fuchsia-200">{stats.avgImpact}</p></div>
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3">
-            <p className="text-xs text-slate-400">排序方式</p>
-            <select value={query.sortBy} onChange={(e) => { setQuery((prev) => ({ ...prev, sortBy: e.target.value })); setHighPage(1); setLowPage(1); }} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200">
+          <div className="app-card rounded-xl p-3"><p className="app-text-muted text-xs">总新闻数量</p><p className="app-accent-text mt-2 text-2xl">{stats.total}</p></div>
+          <div className="app-card rounded-xl p-3"><p className="app-text-muted text-xs">高风险数量</p><p className="app-danger-text mt-2 text-2xl">{stats.highRisk}</p></div>
+          <div className="app-card rounded-xl p-3"><p className="app-text-muted text-xs">本周新增数量</p><p className="app-success-text mt-2 text-2xl">{stats.thisWeek}</p></div>
+          <div className="app-card rounded-xl p-3"><p className="app-text-muted text-xs">平均影响评分</p><p className="mt-2 text-2xl text-fuchsia-500">{stats.avgImpact}</p></div>
+          <div className="app-card rounded-xl p-3">
+            <p className="app-text-muted text-xs">排序方式</p>
+            <select value={query.sortBy} onChange={(e) => { setQuery((prev) => ({ ...prev, sortBy: e.target.value })); setHighPage(1); setLowPage(1); }} className="app-input mt-2 w-full rounded-lg px-2 py-2 text-sm">
               <option value="time">按发布时间</option>
               <option value="impact">按影响评分</option>
               <option value="risk">按风险等级</option>
@@ -392,46 +392,46 @@ function NewsLibraryPage({
         </div>
       </div>
 
-      <div className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl">
+      <div className="app-section rounded-3xl p-6 backdrop-blur-xl">
         <div className="mb-4 flex flex-wrap gap-2">
           {savedViews.map((view) => (
-            <div key={view.id} className="flex items-center gap-1 rounded-full border border-slate-600 bg-slate-900 px-2 py-1">
-              <button type="button" onClick={() => applySavedView(view)} className="text-xs text-slate-200 hover:text-cyan-200">{view.name}</button>
-              <button type="button" onClick={() => removeSavedView(view.id)} className="text-xs text-slate-500 hover:text-rose-300">×</button>
+            <div key={view.id} className="app-chip-neutral flex items-center gap-1 rounded-full px-2 py-1">
+              <button type="button" onClick={() => applySavedView(view)} className="text-xs hover:text-cyan-200">{view.name}</button>
+              <button type="button" onClick={() => removeSavedView(view.id)} className="app-text-faint text-xs hover:text-rose-300">×</button>
             </div>
           ))}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
           <div className="xl:col-span-3">
-            <p className="mb-2 text-xs text-slate-400">平台筛选（多选）</p>
-            <div className="flex flex-wrap gap-2">{allPlatforms.map((item) => <button key={item} type="button" onClick={() => updateMulti('platforms', item)} className={`rounded-full border px-2 py-1 text-xs ${query.platforms.includes(item) ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-200' : 'border-slate-600 text-slate-300'}`}>{item}</button>)}</div>
+            <p className="app-text-muted mb-2 text-xs">平台筛选（多选）</p>
+            <div className="flex flex-wrap gap-2">{allPlatforms.map((item) => <button key={item} type="button" onClick={() => updateMulti('platforms', item)} className={`rounded-full border px-2 py-1 text-xs ${query.platforms.includes(item) ? 'app-accent-chip' : 'app-chip-neutral'}`}>{item}</button>)}</div>
           </div>
           <div className="xl:col-span-2">
-            <p className="mb-2 text-xs text-slate-400">地区筛选</p>
-            <div className="flex flex-wrap gap-2">{allRegions.map((item) => <button key={item} type="button" onClick={() => updateMulti('regions', item)} className={`rounded-full border px-2 py-1 text-xs ${query.regions.includes(item) ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-200' : 'border-slate-600 text-slate-300'}`}>{item}</button>)}</div>
+            <p className="app-text-muted mb-2 text-xs">地区筛选</p>
+            <div className="flex flex-wrap gap-2">{allRegions.map((item) => <button key={item} type="button" onClick={() => updateMulti('regions', item)} className={`rounded-full border px-2 py-1 text-xs ${query.regions.includes(item) ? 'app-accent-chip' : 'app-chip-neutral'}`}>{item}</button>)}</div>
           </div>
           <div className="xl:col-span-2">
-            <p className="mb-2 text-xs text-slate-400">风险等级</p>
-            <div className="flex flex-wrap gap-2">{['低', '中', '高'].map((item) => <button key={item} type="button" onClick={() => updateMulti('riskLevels', item)} className={`rounded-full border px-2 py-1 text-xs ${query.riskLevels.includes(item) ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-200' : 'border-slate-600 text-slate-300'}`}>{item}</button>)}</div>
+            <p className="app-text-muted mb-2 text-xs">风险等级</p>
+            <div className="flex flex-wrap gap-2">{['低', '中', '高'].map((item) => <button key={item} type="button" onClick={() => updateMulti('riskLevels', item)} className={`rounded-full border px-2 py-1 text-xs ${query.riskLevels.includes(item) ? 'app-accent-chip' : 'app-chip-neutral'}`}>{item}</button>)}</div>
           </div>
           <div className="xl:col-span-2">
-            <p className="mb-2 text-xs text-slate-400">模块标签</p>
-            <div className="flex flex-wrap gap-2">{allModules.map((item) => <button key={item} type="button" onClick={() => updateMulti('moduleTags', item)} className={`rounded-full border px-2 py-1 text-xs ${query.moduleTags.includes(item) ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-200' : 'border-slate-600 text-slate-300'}`}>{item}</button>)}</div>
+            <p className="app-text-muted mb-2 text-xs">模块标签</p>
+            <div className="flex flex-wrap gap-2">{allModules.map((item) => <button key={item} type="button" onClick={() => updateMulti('moduleTags', item)} className={`rounded-full border px-2 py-1 text-xs ${query.moduleTags.includes(item) ? 'app-accent-chip' : 'app-chip-neutral'}`}>{item}</button>)}</div>
           </div>
           <div className="xl:col-span-2">
-            <p className="mb-2 text-xs text-slate-400">影响维度</p>
-            <div className="flex flex-wrap gap-2">{allDims.map((item) => <button key={item} type="button" onClick={() => updateMulti('impactDimensions', item)} className={`rounded-full border px-2 py-1 text-xs ${query.impactDimensions.includes(item) ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-200' : 'border-slate-600 text-slate-300'}`}>{item}</button>)}</div>
+            <p className="app-text-muted mb-2 text-xs">影响维度</p>
+            <div className="flex flex-wrap gap-2">{allDims.map((item) => <button key={item} type="button" onClick={() => updateMulti('impactDimensions', item)} className={`rounded-full border px-2 py-1 text-xs ${query.impactDimensions.includes(item) ? 'app-accent-chip' : 'app-chip-neutral'}`}>{item}</button>)}</div>
           </div>
           <div className="xl:col-span-1">
-            <p className="mb-2 text-xs text-slate-400">起始日期</p>
-            <input type="date" value={query.dateFrom} onChange={(e) => { setQuery((prev) => ({ ...prev, dateFrom: e.target.value })); setHighPage(1); setLowPage(1); }} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
-            <input type="date" value={query.dateTo} onChange={(e) => { setQuery((prev) => ({ ...prev, dateTo: e.target.value })); setHighPage(1); setLowPage(1); }} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-200" />
+            <p className="app-text-muted mb-2 text-xs">起始日期</p>
+            <input type="date" value={query.dateFrom} onChange={(e) => { setQuery((prev) => ({ ...prev, dateFrom: e.target.value })); setHighPage(1); setLowPage(1); }} className="app-input w-full rounded-lg px-2 py-2 text-xs" />
+            <input type="date" value={query.dateTo} onChange={(e) => { setQuery((prev) => ({ ...prev, dateTo: e.target.value })); setHighPage(1); setLowPage(1); }} className="app-input mt-2 w-full rounded-lg px-2 py-2 text-xs" />
           </div>
         </div>
 
         <div className="mt-4">
-          <input value={query.keyword} onChange={(e) => { setQuery((prev) => ({ ...prev, keyword: e.target.value })); setHighPage(1); setLowPage(1); }} placeholder="关键词搜索（标题 + 摘要 + 实体）" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500" />
+          <input value={query.keyword} onChange={(e) => { setQuery((prev) => ({ ...prev, keyword: e.target.value })); setHighPage(1); setLowPage(1); }} placeholder="关键词搜索（标题 + 摘要 + 实体）" className="app-input w-full rounded-lg px-3 py-2 text-sm" />
         </div>
       </div>
 
@@ -440,21 +440,21 @@ function NewsLibraryPage({
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, idx) => (
-            <div key={idx} className="h-72 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
+            <div key={idx} className="app-card h-72 animate-pulse rounded-2xl" />
           ))}
         </div>
       ) : highPageList.length === 0 && lowPageList.length === 0 ? (
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-8 text-center text-slate-400">暂无符合条件的新闻</div>
+        <div className="app-card rounded-2xl p-8 text-center app-text-muted">暂无符合条件的新闻</div>
       ) : (
         <>
           <div className="space-y-3 rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.03] p-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200">主新闻区（Impact &gt; 20）</h3>
-              <span className="text-xs text-cyan-200">共 {highTotalCount} 条</span>
+              <h3 className="app-text-primary text-sm font-semibold">主新闻区（Impact &gt; 20）</h3>
+              <span className="app-accent-text text-xs">共 {highTotalCount} 条</span>
             </div>
-            <p className="text-[11px] text-slate-400">高影响事件区：用于优先决策，建议先看本区。</p>
+            <p className="app-text-muted text-[11px]">高影响事件区：用于优先决策，建议先看本区。</p>
             {highPageList.length === 0 ? (
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-5 text-sm text-slate-400">
+              <div className="app-card rounded-2xl p-5 text-sm app-text-muted">
                 {loadingMore || hasMore ? '正在加载更多新闻，请稍候…' : '当前筛选条件下暂无 Impact > 20 的新闻。'}
               </div>
             ) : (
@@ -478,8 +478,8 @@ function NewsLibraryPage({
                 ))}
               </div>
             )}
-            <div className="flex items-center justify-between rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2">
-              <p className="text-xs text-slate-400">
+            <div className="app-card rounded-xl flex items-center justify-between px-3 py-2">
+              <p className="app-text-muted text-xs">
                 主新闻区第 {highPage} / {highTotalPages} 页
               </p>
               <div className="flex gap-2">
@@ -487,7 +487,7 @@ function NewsLibraryPage({
                   type="button"
                   disabled={highPage <= 1}
                   onClick={() => gotoHighPage(highPage - 1)}
-                  className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg app-button-secondary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   上一页
                 </button>
@@ -495,7 +495,7 @@ function NewsLibraryPage({
                   type="button"
                   disabled={hasAdvancedFilters ? highPage >= highTotalPages && !hasMore : highPage >= highTotalPages}
                   onClick={() => gotoHighPage(highPage + 1)}
-                  className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg app-button-secondary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   下一页
                 </button>
@@ -504,18 +504,18 @@ function NewsLibraryPage({
           </div>
 
           <div className="mt-4 flex items-center gap-2 px-1">
-            <div className="h-px flex-1 bg-slate-700/70" />
-            <span className="text-[11px] tracking-[0.16em] uppercase text-slate-500">低影响区（可延后阅读）</span>
-            <div className="h-px flex-1 bg-slate-700/70" />
+            <div className="app-divider h-px flex-1" />
+            <span className="app-text-faint text-[11px] tracking-[0.16em] uppercase">低影响区（可延后阅读）</span>
+            <div className="app-divider h-px flex-1" />
           </div>
 
           {lowImpactAll.length > 0 ? (
-            <div className="mt-4 space-y-3 rounded-2xl border border-slate-700/80 bg-slate-900/30 p-4">
+            <div className="app-section mt-4 space-y-3 rounded-2xl p-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-200">低影响新闻区（Impact ≤ 20）</h3>
-                <span className="text-xs text-slate-400">共 {lowTotalCount} 条</span>
+                <h3 className="app-text-primary text-sm font-semibold">低影响新闻区（Impact ≤ 20）</h3>
+                <span className="app-text-muted text-xs">共 {lowTotalCount} 条</span>
               </div>
-              <p className="text-[11px] text-slate-500">背景信号区：用于补充上下文与跟踪长期变化。</p>
+              <p className="app-text-faint text-[11px]">背景信号区：用于补充上下文与跟踪长期变化。</p>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {lowPageList.map((item) => (
                   <StrategicNewsCard
@@ -535,8 +535,8 @@ function NewsLibraryPage({
                   />
                 ))}
               </div>
-              <div className="flex items-center justify-between rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2">
-                <p className="text-xs text-slate-400">
+              <div className="app-card rounded-xl flex items-center justify-between px-3 py-2">
+                <p className="app-text-muted text-xs">
                   低影响区第 {lowPage} / {lowTotalPages} 页
                 </p>
                 <div className="flex gap-2">
@@ -544,7 +544,7 @@ function NewsLibraryPage({
                     type="button"
                     disabled={lowPage <= 1}
                     onClick={() => gotoLowPage(lowPage - 1)}
-                    className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg app-button-secondary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     上一页
                   </button>
@@ -552,7 +552,7 @@ function NewsLibraryPage({
                     type="button"
                     disabled={hasAdvancedFilters ? lowPage >= lowTotalPages && !hasMore : lowPage >= lowTotalPages}
                     onClick={() => gotoLowPage(lowPage + 1)}
-                    className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg app-button-secondary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     下一页
                   </button>
@@ -564,11 +564,11 @@ function NewsLibraryPage({
       )}
 
       {exportOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-cyan-300/20 bg-slate-900 p-5">
+        <div className="app-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-card w-full max-w-3xl rounded-2xl p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-100">简报 Markdown 预览</h3>
-              <button type="button" onClick={() => setExportOpen(false)} className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300">关闭</button>
+              <h3 className="app-text-primary text-lg font-semibold">简报 Markdown 预览</h3>
+              <button type="button" onClick={() => setExportOpen(false)} className="rounded-lg app-button-secondary px-3 py-1 text-xs">关闭</button>
             </div>
             <textarea
               value={markdown}
@@ -577,10 +577,10 @@ function NewsLibraryPage({
                 storage.setBriefDraft(e.target.value);
               }}
               rows={16}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+              className="app-input w-full rounded-xl px-3 py-2 text-xs"
             />
             <div className="mt-3 flex justify-end">
-              <button type="button" onClick={copyMarkdown} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950">
+              <button type="button" onClick={copyMarkdown} className="app-button-primary rounded-lg px-3 py-1.5 text-xs font-medium">
                 复制 Markdown
               </button>
             </div>

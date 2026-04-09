@@ -46,7 +46,10 @@ function DashboardPage({
   const effectiveDate = String(selectedBriefDate || '').slice(0, 10) || utc8TodayKey();
 
   const selectedDateNews = useMemo(() => {
-    return news.filter((item) => toUtc8DayKey(item.createdAt || item.publishDate) === effectiveDate);
+    return news.filter((item) => {
+      const createdDay = toUtc8DayKey(item.createdAt || item.publishDate);
+      return createdDay === effectiveDate;
+    });
   }, [news, effectiveDate]);
 
   const feedNews = useMemo(() => {

@@ -21,16 +21,16 @@ function getRiskLevel(finalOverall) {
 }
 
 function getRiskTone(level) {
-  if (level === '高风险') return 'text-rose-300 border-rose-400/40 bg-rose-400/10';
-  if (level === '中高') return 'text-amber-200 border-amber-300/40 bg-amber-300/10';
-  if (level === '中性') return 'text-sky-200 border-sky-300/40 bg-sky-300/10';
-  return 'text-emerald-200 border-emerald-300/40 bg-emerald-300/10';
+  if (level === '高风险') return 'app-chip-risk-high';
+  if (level === '中高') return 'app-chip-risk-mid';
+  if (level === '中性') return 'app-chip-info';
+  return 'app-chip-risk-low';
 }
 
 function getExposureTone(index) {
-  if (index >= 0.7) return 'text-rose-300';
-  if (index >= 0.4) return 'text-amber-200';
-  return 'text-emerald-200';
+  if (index >= 0.7) return 'app-danger-text';
+  if (index >= 0.4) return 'app-warning-text';
+  return 'app-success-text';
 }
 
 function toDimensionScore(scoreBreakdown, id) {
@@ -62,6 +62,14 @@ function applyScenarioPatch(base, patch) {
     commissionDelta: clamp(base.commissionDelta + (patch.commissionDelta || 0), -1, 1),
     paymentSuccessDelta: clamp(base.paymentSuccessDelta + (patch.paymentSuccessDelta || 0), -5, 5)
   };
+}
+
+function applySpotlight(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  event.currentTarget.style.setProperty('--spotlight-x', `${x}px`);
+  event.currentTarget.style.setProperty('--spotlight-y', `${y}px`);
 }
 
 function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioApply, result, scoreBreakdown, onOpenEvidence }) {
@@ -118,12 +126,12 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
 
   if (!result || !scoreBreakdown) {
     return (
-      <section data-ga-section="sandbox" className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+      <section data-ga-section="sandbox" className="app-section rounded-3xl p-6 backdrop-blur-xl lg:p-8">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
-          <span className="text-xs text-slate-400">加载中...</span>
+          <h2 className="app-text-primary text-xl font-semibold lg:text-2xl">收入影响沙盘</h2>
+          <span className="app-text-muted text-xs">加载中...</span>
         </div>
-        <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-400">
+        <div className="app-card mt-4 rounded-xl p-4 text-sm app-text-muted">
           收入沙盘与评分拆解正在计算，请稍候。
         </div>
       </section>
@@ -131,15 +139,15 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
   }
 
   return (
-    <section data-ga-section="sandbox" className="rounded-3xl border border-blue-300/20 bg-slate-900/60 p-6 backdrop-blur-xl lg:p-8">
+    <section data-ga-section="sandbox" className="app-section rounded-3xl p-6 backdrop-blur-xl lg:p-8">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="text-xl font-semibold text-slate-100 lg:text-2xl">收入影响沙盘</h2>
+        <h2 className="app-text-primary text-xl font-semibold lg:text-2xl">收入影响沙盘</h2>
         <div className="flex items-center gap-2">
           <MethodPopover />
           <button
             type="button"
             onClick={() => onOpenEvidence(result.evidence)}
-            className="rounded-full border border-blue-300/35 bg-blue-300/10 px-3 py-1 text-xs text-blue-200"
+            className="rounded-full app-accent-chip px-3 py-1.5 text-xs"
           >
             数据接口: {result.endpoint} · 查看引用新闻
           </button>
@@ -147,14 +155,14 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <article className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
-          <p className="mb-4 text-sm text-slate-300">行动模拟</p>
+        <article onPointerMove={applySpotlight} className="app-card app-card-spotlight rounded-2xl p-4">
+          <p className="app-text-secondary mb-4 text-sm">行动模拟</p>
           <div className="space-y-4">
             {sliders.map((item) => (
               <div key={item.key}>
-                <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
+                <div className="app-text-secondary mb-2 flex items-center justify-between text-xs">
                   <span>{item.label}</span>
-                  <span className="text-cyan-200">{formatSliderValue(item.key, Number(item.value))}</span>
+                  <span className="app-accent-text">{formatSliderValue(item.key, Number(item.value))}</span>
                 </div>
                 <input
                   type="range"
@@ -163,7 +171,8 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                   step={item.step}
                   value={item.value}
                   onChange={(e) => onScenarioChange(item.key, Number(e.target.value))}
-                  className="w-full accent-cyan-400"
+                  className="w-full"
+                  style={{ accentColor: 'var(--app-accent)' }}
                 />
               </div>
             ))}
@@ -175,7 +184,7 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                 key={item.label}
                 type="button"
                 onClick={() => onScenarioApply(applyScenarioPatch(scenario, item.patch))}
-                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+                className="rounded-lg app-button-secondary px-3 py-1.5 text-xs"
               >
                 {item.label}
               </button>
@@ -183,27 +192,27 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
           </div>
 
           <div className="mt-5 grid grid-cols-2 gap-3 text-xs">
-            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <p className="text-slate-400">GMV 影响区间</p>
-              <p className="mt-1 text-cyan-200">{result.outputs.gmv}</p>
+            <div className="app-card-soft rounded-lg p-3">
+              <p className="app-text-muted">GMV 影响区间</p>
+              <p className="app-accent-text mt-1">{result.outputs.gmv}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <p className="text-slate-400">订阅影响</p>
-              <p className="mt-1 text-cyan-200">{result.outputs.subscription}</p>
+            <div className="app-card-soft rounded-lg p-3">
+              <p className="app-text-muted">订阅影响</p>
+              <p className="app-accent-text mt-1">{result.outputs.subscription}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <p className="text-slate-400">佣金影响</p>
-              <p className="mt-1 text-cyan-200">{result.outputs.commission}</p>
+            <div className="app-card-soft rounded-lg p-3">
+              <p className="app-text-muted">佣金影响</p>
+              <p className="app-accent-text mt-1">{result.outputs.commission}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <p className="text-slate-400">支付成本变化</p>
-              <p className="mt-1 text-cyan-200">{result.outputs.paymentCost}</p>
+            <div className="app-card-soft rounded-lg p-3">
+              <p className="app-text-muted">支付成本变化</p>
+              <p className="app-accent-text mt-1">{result.outputs.paymentCost}</p>
             </div>
           </div>
         </article>
 
-        <article className="rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-4">
-          <p className="mb-3 text-sm font-medium text-cyan-200">Strategic Dashboard Panel</p>
+        <article onPointerMove={applySpotlight} className="app-accent-panel app-card-spotlight rounded-2xl p-4">
+          <p className="app-accent-text mb-3 text-sm font-medium">Strategic Dashboard Panel</p>
 
           <div className={`rounded-xl border px-4 py-3 ${getRiskTone(riskLevel)}`}>
             <p className="text-xs">当前战略风险等级</p>
@@ -215,9 +224,9 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
             </p>
           </div>
 
-          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
-            <p className="mb-2 text-sm text-slate-200">收入结构暴露矩阵</p>
-            <div className="grid grid-cols-[1.1fr_1fr_1fr_1fr] gap-2 text-[11px] text-slate-400">
+          <div onPointerMove={applySpotlight} className="app-card app-card-spotlight mt-4 rounded-xl p-3">
+            <p className="app-text-primary mb-2 text-sm">收入结构暴露矩阵</p>
+            <div className="app-text-muted grid grid-cols-[1.1fr_1fr_1fr_1fr] gap-2 text-[11px]">
               <span>维度</span>
               <span>外部风险</span>
               <span>内部敏感度</span>
@@ -229,27 +238,27 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                   key={row.id}
                   type="button"
                   onClick={() => setExpandedId(row.id)}
-                  className={`grid w-full grid-cols-[1.1fr_1fr_1fr_1fr] items-center gap-2 rounded-lg border px-2 py-2 text-left text-xs ${
-                    expandedId === row.id ? 'border-cyan-300/40 bg-cyan-400/5' : 'border-slate-700 bg-slate-900/50'
+                  className={`grid w-full grid-cols-[1.1fr_1fr_1fr_1fr] items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs ${
+                    expandedId === row.id ? 'app-card-selected' : 'app-card-soft app-card-hoverable'
                   }`}
                   title={`Baseline ${row.baseline} / Δ ${formatDelta(row.delta)} / Final ${row.final}`}
                 >
-                  <span className="text-slate-200">{row.name}</span>
-                  <span className="text-slate-300">{row.externalRisk.toFixed(2)}</span>
-                  <span className="text-slate-300">{row.internalSensitivity.toFixed(2)}</span>
+                  <span className="app-text-primary">{row.name}</span>
+                  <span className="app-text-secondary">{row.externalRisk.toFixed(2)}</span>
+                  <span className="app-text-secondary">{row.internalSensitivity.toFixed(2)}</span>
                   <span className={getExposureTone(row.exposureIndex)}>{row.exposureIndex.toFixed(2)}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
-            <p className="mb-2 text-sm text-slate-200">战略优先级排序</p>
+          <div onPointerMove={applySpotlight} className="app-card app-card-spotlight mt-4 rounded-xl p-3">
+            <p className="app-text-primary mb-2 text-sm">战略优先级排序</p>
             <div className="space-y-1.5 text-xs">
               {exposureRows.map((row, index) => (
-                <div key={row.id} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1.5">
-                  <span className="text-slate-100">
-                    <span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-cyan-200">P{index}</span>
+                <div key={row.id} className="app-card-soft flex items-center justify-between rounded-xl px-3 py-2">
+                  <span className="app-text-primary">
+                    <span className="app-accent-chip mr-2 rounded px-1.5 py-0.5 text-[10px]">P{index}</span>
                     {row.name}
                   </span>
                   <span className={getExposureTone(row.exposureIndex)}>{row.exposureIndex.toFixed(2)}</span>
@@ -261,34 +270,34 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
       </div>
 
       {currentExpanded ? (
-        <article className="mt-5 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
-          <p className="text-sm font-medium text-cyan-200">可解释因果链：{currentExpanded.name}</p>
-          <div className="mt-3 grid gap-2 text-xs text-slate-300 md:grid-cols-5">
-            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-              <p className="text-slate-400">政策/新闻信号数量</p>
+        <article onPointerMove={applySpotlight} className="app-card app-card-spotlight mt-5 rounded-2xl p-4">
+          <p className="app-accent-text text-sm font-medium">可解释因果链：{currentExpanded.name}</p>
+          <div className="app-text-secondary mt-3 grid gap-2 text-xs md:grid-cols-5">
+            <div className="app-card-soft rounded-lg p-2">
+              <p className="app-text-muted">政策/新闻信号数量</p>
               <p className="mt-1">{currentExpanded.evidenceIds.length}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-              <p className="text-slate-400">Baseline</p>
+            <div className="app-card-soft rounded-lg p-2">
+              <p className="app-text-muted">Baseline</p>
               <p className="mt-1">{currentExpanded.baseline}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-              <p className="text-slate-400">内部敏感度</p>
+            <div className="app-card-soft rounded-lg p-2">
+              <p className="app-text-muted">内部敏感度</p>
               <p className="mt-1">{currentExpanded.internalSensitivity.toFixed(2)}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-              <p className="text-slate-400">Δ 影响</p>
+            <div className="app-card-soft rounded-lg p-2">
+              <p className="app-text-muted">Δ 影响</p>
               <p className="mt-1">{formatDelta(currentExpanded.delta)}</p>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-              <p className="text-slate-400">Final</p>
+            <div className="app-card-soft rounded-lg p-2">
+              <p className="app-text-muted">Final</p>
               <p className="mt-1">{currentExpanded.final}</p>
             </div>
           </div>
 
-          <div className="mt-3 rounded-xl border border-slate-700 bg-slate-900/50 p-3">
+          <div className="app-card-soft mt-3 rounded-xl p-3">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs text-slate-300">引用新闻</p>
+              <p className="app-text-secondary text-xs">引用新闻</p>
               <button
                 type="button"
                 onClick={() =>
@@ -298,16 +307,16 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                     newsIds: currentExpanded.evidenceIds
                   })
                 }
-                className="text-xs text-cyan-200 hover:underline"
+                className="app-accent-text text-xs hover:underline"
               >
                 查看全部证据
               </button>
             </div>
             <div className="space-y-2">
               {expandedNews.slice(0, 6).map((item) => (
-                <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-2">
-                  <p className="text-xs text-slate-100">{item.title}</p>
-                  <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">{item.aiTldr}</p>
+                <div key={item.id} className="app-card rounded-lg px-2 py-2">
+                  <p className="app-text-primary text-xs">{item.title}</p>
+                  <p className="app-text-muted mt-1 line-clamp-2 text-[11px]">{item.aiTldr}</p>
                   <a
                     href={item.originalUrl}
                     target="_blank"
@@ -321,13 +330,13 @@ function RevenueImpact({ insight, news, scenario, onScenarioChange, onScenarioAp
                       }
                       track('citation_click', { news_id: String(item?.id || ''), domain });
                     }}
-                    className="mt-1 inline-block text-[11px] text-cyan-200 hover:underline"
+                    className="app-accent-text mt-1 inline-block text-[11px] hover:underline"
                   >
                     打开原文
                   </a>
                 </div>
               ))}
-              {expandedNews.length === 0 ? <p className="text-xs text-slate-500">暂无引用新闻</p> : null}
+              {expandedNews.length === 0 ? <p className="app-text-faint text-xs">暂无引用新闻</p> : null}
             </div>
           </div>
         </article>

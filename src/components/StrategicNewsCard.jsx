@@ -1,7 +1,7 @@
 const riskStyles = {
-  低: 'text-emerald-300 border-emerald-300/40 bg-emerald-300/10',
-  中: 'text-amber-200 border-amber-300/40 bg-amber-300/10',
-  高: 'text-rose-300 border-rose-300/40 bg-rose-300/10'
+  低: 'app-chip-risk-low',
+  中: 'app-chip-risk-mid',
+  高: 'app-chip-risk-high'
 };
 
 function StrategicNewsCard({
@@ -13,18 +13,18 @@ function StrategicNewsCard({
   onOpenReference
 }) {
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-slate-700/70 bg-slate-950/65 p-4 transition duration-300 hover:border-cyan-300/40 hover:shadow-[0_0_25px_rgba(34,211,238,0.15)]">
+    <article className="app-card app-card-hoverable flex h-full flex-col rounded-2xl p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-xs text-slate-400">{news.source}</span>
+        <span className="app-text-muted text-xs">{news.source}</span>
         <div className="flex items-center gap-2">
-          {isRead ? <span className="text-[10px] text-emerald-300">已读</span> : null}
+          {isRead ? <span className="app-success-text text-[10px]">已读</span> : null}
           <button
             type="button"
             onClick={() => onToggleFavorite(news.id)}
             className={`rounded-full border px-2 py-0.5 text-[10px] ${
               isFavorite
                 ? 'border-fuchsia-300/40 bg-fuchsia-300/10 text-fuchsia-200'
-                : 'border-slate-600 text-slate-300 hover:border-fuchsia-300/40'
+                : 'app-chip-neutral hover:border-fuchsia-300/40'
             }`}
           >
             {isFavorite ? '已收藏' : '收藏'}
@@ -32,28 +32,28 @@ function StrategicNewsCard({
         </div>
       </div>
 
-      <h3 className="text-base font-medium leading-6 text-slate-100">{news.title}</h3>
-      <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-300">{news.aiTldr}</p>
+      <h3 className="app-text-primary text-base font-medium leading-7">{news.title}</h3>
+      <p className="app-text-secondary mt-3 line-clamp-3 text-sm leading-6">{news.aiTldr}</p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2 py-1 text-xs ${riskStyles[news.riskLevel]}`}>风险: {news.riskLevel}</span>
-        <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-300/10 px-2 py-1 text-xs text-fuchsia-200">
+        <span className="app-chip-score rounded-full px-2 py-1 text-xs">
           影响评分: {news.impactScore}
         </span>
-        <span className="rounded-full border border-blue-300/30 bg-blue-300/10 px-2 py-1 text-xs text-blue-200">
+        <span className="app-chip-info rounded-full px-2 py-1 text-xs">
           平台: {news.platform}
         </span>
-        <span className="rounded-full border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-200">地区: {news.region}</span>
+        <span className="rounded-full app-chip-neutral px-2 py-1 text-xs">地区: {news.region}</span>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         {news.impactDimensions.map((item) => (
-          <span key={item} className="rounded-full border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200">
+          <span key={item} className="rounded-full app-chip-tag px-2 py-1">
             {item}
           </span>
         ))}
         {news.moduleTags.map((tag) => (
-          <span key={tag} className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-cyan-200">
+          <span key={tag} className="app-accent-chip rounded-full px-2 py-1">
             {tag}
           </span>
         ))}
@@ -64,7 +64,7 @@ function StrategicNewsCard({
           <button
             type="button"
             onClick={() => onDetail(news.id)}
-            className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-cyan-400"
+            className="app-button-primary rounded-xl px-3.5 py-2 text-xs font-medium"
           >
             查看详情
           </button>
@@ -72,7 +72,7 @@ function StrategicNewsCard({
             href={news.originalUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40 hover:text-cyan-200"
+            className="rounded-xl app-button-secondary px-3.5 py-2 text-xs"
           >
             查看原文
           </a>
@@ -82,7 +82,7 @@ function StrategicNewsCard({
           <button
             type="button"
             onClick={onOpenReference}
-            className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200"
+            className="mt-2 rounded-xl app-button-secondary px-3.5 py-2 text-xs"
           >
             查看被引用关系
           </button>
