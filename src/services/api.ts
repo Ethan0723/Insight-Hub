@@ -84,10 +84,11 @@ function inferPlatform(title: string, source = '', originalUrl = ''): string {
   if (isOfficial(['newsroom.tiktok.com', 'tiktok.com'])) return 'TikTok Shop';
   if (isOfficial(['temu.com', 'pddholdings.com'])) return 'Temu';
 
-  // Non-official sources: only map when platform is clearly headline subject and not negated.
-  if (!hasNegatedShopify && /^(shopify|\[shopify\]|shopify[:：-])/.test(t)) return 'Shopify';
+  // Non-official sources: keep the match conservative, but do not require the
+  // platform keyword to appear only at the headline start.
+  if (!hasNegatedShopify && /\bshopify\b/.test(t)) return 'Shopify';
   if (/^(amazon|\[amazon\]|amazon[:：-])/.test(t)) return 'Amazon';
-  if (/^(tiktok|tiktok shop|\[tiktok\]|tiktok[:：-])/.test(t)) return 'TikTok Shop';
+  if (/\btiktok(\s+shop)?\b/.test(t)) return 'TikTok Shop';
   if (/^(temu|\[temu\]|temu[:：-])/.test(t)) return 'Temu';
 
   return 'Global';
@@ -260,10 +261,112 @@ function toNewsItem(row: any): NewsItem {
   };
 }
 
+function normalizeUrlForDedupe(raw: string): string {
+  try {
+    const url = new URL(String(raw || '').trim());
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return `${url.hostname.toLowerCase()}${pathname}`;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeTextForDedupe(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/amazon|亚马逊/g, ' amazon ')
+    .replace(/shopify/g, ' shopify ')
+    .replace(/tiktok shop|tiktok|抖音/g, ' tiktok ')
+    .replace(/temu/g, ' temu ')
+    .replace(/fba/g, ' fba ')
+    .replace(/燃油附加费|燃油及物流附加费|物流附加费|附加费/g, ' surcharge ')
+    .replace(/%/g, ' percent ')
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildBigrams(text: string): Set<string> {
+  const compact = text.replace(/\s+/g, '');
+  const out = new Set<string>();
+  if (!compact) return out;
+  if (compact.length === 1) {
+    out.add(compact);
+    return out;
+  }
+  for (let i = 0; i < compact.length - 1; i += 1) {
+    out.add(compact.slice(i, i + 2));
+  }
+  return out;
+}
+
+function bigramSimilarity(a: string, b: string): number {
+  const aSet = buildBigrams(a);
+  const bSet = buildBigrams(b);
+  if (!aSet.size || !bSet.size) return 0;
+  let intersection = 0;
+  aSet.forEach((token) => {
+    if (bSet.has(token)) intersection += 1;
+  });
+  const union = new Set([...aSet, ...bSet]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+function daysBetween(a: string, b: string): number {
+  const aMs = Date.parse(a || '') || 0;
+  const bMs = Date.parse(b || '') || 0;
+  if (!aMs || !bMs) return Number.POSITIVE_INFINITY;
+  return Math.abs(aMs - bMs) / (24 * 60 * 60 * 1000);
+}
+
+function pickPreferredNewsItem(current: NewsItem, candidate: NewsItem): NewsItem {
+  if ((candidate.impactScore || 0) !== (current.impactScore || 0)) {
+    return (candidate.impactScore || 0) > (current.impactScore || 0) ? candidate : current;
+  }
+  const candidateTs = Date.parse(candidate.createdAt || candidate.publishDate || '') || 0;
+  const currentTs = Date.parse(current.createdAt || current.publishDate || '') || 0;
+  return candidateTs >= currentTs ? candidate : current;
+}
+
+function areLikelyDuplicateNews(a: NewsItem, b: NewsItem): boolean {
+  const urlA = normalizeUrlForDedupe(a.originalUrl);
+  const urlB = normalizeUrlForDedupe(b.originalUrl);
+  if (urlA && urlB && urlA === urlB) return true;
+
+  const titleA = normalizeTextForDedupe(a.title);
+  const titleB = normalizeTextForDedupe(b.title);
+  const summaryA = normalizeTextForDedupe(`${a.title} ${a.aiTldr} ${a.summary}`);
+  const summaryB = normalizeTextForDedupe(`${b.title} ${b.aiTldr} ${b.summary}`);
+  const titleSimilarity = bigramSimilarity(titleA, titleB);
+  const summarySimilarity = bigramSimilarity(summaryA, summaryB);
+  const samePlatform = a.platform === b.platform || a.platform === 'Global' || b.platform === 'Global';
+  const nearPublishDay = daysBetween(a.publishDate, b.publishDate) <= 2;
+
+  return samePlatform && nearPublishDay && (titleSimilarity >= 0.72 || summarySimilarity >= 0.68);
+}
+
+function dedupeNewsItems(list: NewsItem[]): NewsItem[] {
+  const deduped: NewsItem[] = [];
+  const sorted = [...list].sort((a, b) => {
+    const impactDiff = (b.impactScore || 0) - (a.impactScore || 0);
+    if (impactDiff !== 0) return impactDiff;
+    return (Date.parse(b.createdAt || b.publishDate || '') || 0) - (Date.parse(a.createdAt || a.publishDate || '') || 0);
+  });
+
+  sorted.forEach((item) => {
+    const hitIndex = deduped.findIndex((existing) => areLikelyDuplicateNews(existing, item));
+    if (hitIndex === -1) {
+      deduped.push(item);
+      return;
+    }
+    deduped[hitIndex] = pickPreferredNewsItem(deduped[hitIndex], item);
+  });
+
+  return deduped;
+}
+
 function isClearlyIrrelevant(item: NewsItem): boolean {
   const lowConfidenceSignals = [
-    '信息不足',
-    '判断置信度较低',
     '模型未返回合法 json',
     '待翻译',
     'low confidence'
@@ -504,6 +607,17 @@ function toDailyBriefCitation(value: unknown, newsMap: Map<string, NewsItem>, id
   };
 }
 
+function hasReadableCitationTitles(citations: StrategyBrief['citations'] | undefined): boolean {
+  if (!Array.isArray(citations) || !citations.length) return false;
+  return citations.some((item) => {
+    const title = String(item?.title || '').trim();
+    if (!title) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(title)) return false;
+    if (/^brief-\d+$/i.test(title)) return false;
+    return true;
+  });
+}
+
 function hasCjk(text: string): boolean {
   return /[\u4e00-\u9fff]/.test(text);
 }
@@ -535,12 +649,14 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
   const citationsRaw = safeParseJsonValue(row.citations);
   const statsRaw = safeParseJsonValue(row.stats);
 
-  const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any) => ({
+  const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any, idx: number) => ({
+    id: `daily-brief-driver-${idx}`,
     title: chineseOrFallback(String(driver?.title || ''), '外部信号变化'),
-    source: 'LLM综合',
+    source: 'daily_brief',
     impact_score: 0,
     risk_level: '中' as const,
-    why: chineseOrFallback(String(driver?.why_it_matters || ''), '该信号将影响近期经营决策。')
+    why: chineseOrFallback(String(driver?.why_it_matters || ''), '该信号将影响近期经营决策。'),
+    signals: Array.isArray(driver?.signals) ? driver.signals.map((item: unknown) => String(item || '').trim()).filter(Boolean) : []
   }));
 
   const actions = (Array.isArray(actionsRaw) ? actionsRaw : [])
@@ -654,7 +770,7 @@ async function fetchFromSupabaseRaw(
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
   runtimeDataSource = 'supabase_direct';
-  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+  return dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item)));
 }
 
 async function fetchFromServerProxyRaw(
@@ -678,7 +794,7 @@ async function fetchFromServerProxyRaw(
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
   runtimeDataSource = 'server_proxy';
-  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+  return dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item)));
 }
 
 async function getSupabaseNewsCached(
@@ -831,7 +947,7 @@ function topDimensions(news: NewsItem[]) {
 
 function buildDailyStrategyBrief(news: NewsItem[]) {
   const todayKey = toUtc8DateKey(Date.now());
-  const todayNews = news
+  const todayNews = dedupeNewsItems(news)
     .filter((item) => {
       const created = Date.parse(item.createdAt || item.publishDate || '') || 0;
       return toUtc8DateKey(created) === todayKey;
@@ -1107,8 +1223,7 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
       .filter((item) => item.platform === platform)
       .filter((item) => (platform === 'Shopify' ? !isShopifyFalsePositive(item) : true))
       .filter((item) => !isLowConfidenceInsight(item))
-      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
-      .slice(0, 4);
+      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime());
     const first = rows[0];
     const fallback = `暂无 ${platform} 最新事件，建议继续追踪。`;
     const evidenceIds = rows.map((item) => item.id);
@@ -1149,7 +1264,8 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
       evidence: {
         id: `ev-m-${platform.toLowerCase().replace(/\s+/g, '-')}`,
         title: `${platform} 竞争引用`,
-        newsIds: evidenceIds
+        newsIds: evidenceIds,
+        items: rows
       }
     };
   });
@@ -1355,6 +1471,13 @@ export const api = {
       const news = await newsPromise;
       return getDailyBriefFromData(news, date);
     }
+    if (brief.meta?.brief_source === 'daily_brief' && !hasReadableCitationTitles(brief.citations)) {
+      const news = await newsPromise;
+      if (news.length > 0) {
+        const enriched = await getDailyBriefFromData(news, date);
+        if (enriched) return enriched;
+      }
+    }
     return brief;
   },
 
@@ -1441,7 +1564,7 @@ export const api = {
     });
     return {
       fetchedCount: rows.length,
-      list: rows.map(toNewsItem).filter((item) => Boolean(item.id))
+      list: dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)))
     };
   }
 };

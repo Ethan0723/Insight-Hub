@@ -57,6 +57,7 @@ export interface EvidenceLink {
   id: string;
   title: string;
   newsIds: NewsId[];
+  items?: NewsItem[];
 }
 
 export interface IndexItem {
