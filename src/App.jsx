@@ -341,8 +341,22 @@ function App() {
   const evidenceNews = useMemo(() => {
     const unique = [...new Set(evidenceData.newsIds)];
     const mapped = unique.map((id) => newsMap.get(id)).filter(Boolean);
-    if (mapped.length > 0) return mapped;
-    if (Array.isArray(evidenceData.items) && evidenceData.items.length > 0) return evidenceData.items;
+    const seeded = Array.isArray(evidenceData.items) ? evidenceData.items : [];
+    if (mapped.length > 0 && seeded.length === 0) return mapped;
+    if (seeded.length > 0) {
+      const merged = new Map();
+      seeded.forEach((item) => {
+        const id = String(item?.id || '');
+        merged.set(id || `seed:${merged.size}`, item);
+      });
+      mapped.forEach((item) => {
+        const id = String(item?.id || '');
+        if (!id) return;
+        const fallback = merged.get(id) || {};
+        merged.set(id, { ...fallback, ...item });
+      });
+      return Array.from(merged.values());
+    }
     return [];
   }, [evidenceData.newsIds, evidenceData.items, newsMap]);
 

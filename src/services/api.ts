@@ -829,6 +829,37 @@ async function getSupabaseNewsCached(
   return task;
 }
 
+async function getMatrixNews(params: { dateFrom?: string; dateTo?: string; recentDays?: number }): Promise<NewsItem[]> {
+  const { dateFrom, dateTo, recentDays = 7 } = params;
+  const hasExplicitRange = Boolean(dateFrom || dateTo);
+
+  if (!hasExplicitRange) {
+    return getRealOrMockNews(false, SUPABASE_LIMIT, true, recentDays, dateFrom, dateTo);
+  }
+
+  const total = await api.getNewsTotal(dateFrom, dateTo);
+  if (!Number.isFinite(total) || total <= 0) return [];
+
+  const batchSize = 500;
+  const offsets: number[] = [];
+  for (let offset = 0; offset < total; offset += batchSize) {
+    offsets.push(offset);
+  }
+
+  const batches = await Promise.all(
+    offsets.map((offset) =>
+      api.getNewsBatch({
+        offset,
+        limit: batchSize,
+        dateFrom,
+        dateTo
+      })
+    )
+  );
+
+  return dedupeNewsItems(batches.flatMap((batch) => batch.list));
+}
+
 function fallbackNews(): NewsItem[] {
   return [...mockNews];
 }
@@ -1483,18 +1514,8 @@ export const api = {
 
   async getMatrix(params: { dateFrom?: string; dateTo?: string; recentDays?: number } = {}): Promise<MatrixRow[]> {
     await delay(150);
-    const { dateFrom, dateTo, recentDays = 7 } = params;
     try {
-      return buildMatrix(
-        await getRealOrMockNews(
-          false,
-          SUPABASE_LIMIT,
-          true,
-          dateFrom || dateTo ? null : recentDays,
-          dateFrom,
-          dateTo
-        )
-      );
+      return buildMatrix(await getMatrixNews(params));
     } catch (err) {
       console.warn('[api] getMatrix failed, fallback to mock matrix.', err);
       return mockMatrix;
