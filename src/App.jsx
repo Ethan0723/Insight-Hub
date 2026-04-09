@@ -43,6 +43,7 @@ function writeCoreSnapshot(payload) {
 }
 
 function App() {
+  const [theme, setTheme] = useState(() => storage.getTheme());
   const [selectedBriefDate, setSelectedBriefDate] = useState(() => {
     return utc8DateKey(0);
   });
@@ -87,6 +88,11 @@ function App() {
     offsetY: 0
   });
   const observedSectionsRef = useRef(new Set());
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    storage.setTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     let mounted = true;
@@ -295,7 +301,7 @@ function App() {
   useEffect(() => {
     if (fabPos.x !== null && fabPos.y !== null) return;
     const initialX = Math.max(12, window.innerWidth - 180);
-    const initialY = Math.max(110, Math.round(window.innerHeight * 0.55));
+    const initialY = Math.max(140, Math.round(window.innerHeight * 0.76));
     setFabPos({ x: initialX, y: initialY });
   }, [fabPos.x, fabPos.y]);
 
@@ -394,6 +400,10 @@ function App() {
     });
   };
 
+  const onToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   const inferEvidenceSource = (evidence) => {
     const source = String(evidence?.source || '').trim();
     if (source === 'daily_brief' || source === 'news_raw') return source;
@@ -446,12 +456,12 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="app-page">
         <div className="mx-auto max-w-[1400px] px-4 py-20 lg:px-8">
-          <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-800" />
+          <div className="h-10 w-64 animate-pulse rounded-lg app-card-soft" />
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, idx) => (
-              <div key={idx} className="h-40 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
+              <div key={idx} className="h-40 animate-pulse rounded-2xl app-card" />
             ))}
           </div>
         </div>
@@ -461,13 +471,13 @@ function App() {
 
   if (!insight) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="app-page">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
           <p className="text-sm text-rose-300">{error || '系统加载异常'}</p>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="mt-4 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40"
+            className="mt-4 rounded-lg app-button-secondary px-3 py-1.5 text-xs"
           >
             刷新重试
           </button>
@@ -477,10 +487,17 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
+    <div className="app-page">
+      <div className="app-ambient pointer-events-none fixed inset-0 -z-10" />
 
-      <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={onToggleAIPanel} />
+      <TopNav
+        activeKey={activeNav}
+        onNavigate={onNavigate}
+        aiPanelOpen={aiPanelOpen}
+        onToggleAI={onToggleAIPanel}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
 
       {error ? (
         <div className="mx-auto mt-4 max-w-[1400px] px-4 lg:px-8">
@@ -553,7 +570,7 @@ function App() {
             left: fabPos.x ?? undefined,
             top: fabPos.y ?? undefined
           }}
-          className="fixed z-30 cursor-move rounded-full border border-cyan-300/40 bg-slate-900/90 px-4 py-2 text-xs text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.22)] hover:bg-slate-800"
+          className="app-fab fixed z-30 cursor-move rounded-full px-4 py-2 text-xs"
         >
           🧠 展开 AI 助手
         </button>
