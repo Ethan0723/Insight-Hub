@@ -64,6 +64,7 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 评分口径：`Final = clamp(Baseline + Delta, 0..100)`
 - Baseline 来自外部态势，Delta 来自策略参数模拟
 - 暴露指数用于优先级排序（P0/P1/P2/P3）
+- 单条新闻影响分、四维 Baseline、沙盘 Delta、Final 分数均有独立口径，可拆解解释
 
 ### 2.5 竞争矩阵与证据溯源
 - 竞争动态矩阵支持近 7 天 / 15 天 / 自定义日期范围
@@ -304,16 +305,128 @@ python -m news_pipeline.daily_brief
 - 按 UTC+8 切日
 - 查询窗口：`[当天 00:00+8, 次日 00:00+8)`
 
-### 9.2 战略评分口径
-- `Baseline = 外部态势`
-- `Delta = 策略模拟`
-- `Final = clamp(Baseline + Delta, 0..100)`
+### 9.2 新闻影响评分（单条新闻）
 
-### 9.3 证据链
+定义：
+- `impact_score` 用于衡量单条新闻对跨境电商 SaaS 业务的潜在影响强度，范围 `0~100`
+
+来源：
+- 由 LLM 在新闻结构化摘要阶段输出
+- 系统再做规则化约束和兜底
+
+当前规则：
+- 最终分数强制限制在 `0~100`
+- 若模型输出缺失或非法，走默认兜底分 `25`
+- 若正文过短（当前规则为 `<120` 字符），会将分数压低到最多 `30`
+- 若内容不足，`tldr` 会附加“信息不足，判断置信度较低”类提示
+
+理解建议：
+- `0~30`：信息不足 / 低置信度 / 短讯
+- `30~60`：有业务相关性，但影响有限或不确定
+- `60~80`：对一个或多个业务维度存在明确影响
+- `80~100`：高确定性、高传导性、可能影响战略或收入结构
+
+### 9.3 Baseline（外部基线）
+
+定义：
+- Baseline 表示“外部环境本身”对业务的压力或机会，不考虑内部策略调节
+
+输入来源：
+- 近期新闻集合
+- 新闻先被映射到若干主题集合：
+  - `policyIds`：政策标签或高风险新闻
+  - `aiThreatIds`：AI 标签或标题含 `agent` 的新闻
+  - `competeIds`：平台竞争相关新闻
+  - `paymentIds`：支付维度相关新闻
+  - `revenueIds`：订阅 / 佣金相关新闻
+
+基础中间量：
+- `avgImpact = 所有新闻 impact_score 平均值`
+- `highRiskRatio = 高风险新闻占比`
+
+五个基础指数：
+- 行业增长动能：`growth = clamp(avgImpact - 6, 45, 92)`
+- AI Agent 威胁：`agent = clamp((aiThreatIds.length / news.length) * 200 + 55, 40, 95)`
+- 竞争活跃度：`compete = clamp((competeIds.length / news.length) * 180 + 50, 45, 95)`
+- 收入稳定度：`stable = clamp(75 - highRiskRatio * 30, 30, 90)`
+- 政策风险：`policy = clamp((policyIds.length / news.length) * 220 + 45, 35, 95)`
+
+四个业务维度 Baseline：
+- 订阅：`(growth + stable) / 2`
+- 佣金：`(growth + compete) / 2`
+- 支付：`(policy + stable) / 2`
+- 生态：`(agent + compete) / 2`
+
+整体 Baseline：
+- `overall = clamp(avgImpact, 55, 95)`
+
+解释：
+- 单条新闻越“重”，整体外部基线越高
+- 某类新闻越密集，对应维度 Baseline 越高
+- 高风险新闻越多，稳定度越低
+
+### 9.4 Delta（内部策略模拟）
+
+定义：
+- Delta 表示你在收入影响沙盘中调整内部参数后，对四个维度造成的增减影响
+
+输入参数：
+- `arpuDelta`：订阅 ARPU 调整
+- `commissionDelta`：佣金率调整
+- `paymentSuccessDelta`：支付成功率调整
+
+当前模拟公式：
+- 订阅 Delta：`subscriptionDelta = arpuDelta * 20`
+- 佣金 Delta：`commissionDelta = commissionDelta * 25`
+- 支付 Delta：`paymentDelta = - paymentSuccessDelta * 20`
+- 生态 Delta：`ecosystemDelta = (arpuDelta * 0.08 + commissionDelta * 180 + paymentSuccessDelta * 0.12) * 10`
+
+整体 Delta：
+- 四个维度 Delta 的平均值后四舍五入
+
+解释：
+- 提升 ARPU 会推高订阅维度 Delta
+- 提升佣金率会推高佣金维度 Delta
+- 提升支付成功率被视作风险缓释，因此支付风险分下降
+- 生态维度反映多个参数联动后的综合影响
+
+### 9.5 Final（最终分）
+
+定义：
+- Final 是最终用于风险展示、优先级排序和决策参考的分数
+
+公式：
+- `Final = clamp(Baseline + Delta, 0, 100)`
+
+解释：
+- `Baseline` 代表外部环境
+- `Delta` 代表内部策略变化
+- `Final` 代表两者叠加后的业务风险 / 优先级结果
+
+### 9.6 收入影响沙盘字段解释
+
+收入结构暴露矩阵中的字段：
+- `外部风险 = Baseline / 100`
+- `内部敏感度 = min(abs(Delta) / 100, 1)`
+- `综合暴露 = Baseline * abs(Delta) / 10000`
+
+用途：
+- `综合暴露` 越高，说明该维度同时具备“外部信号强”和“内部参数敏感”两个特征
+- 前端按该值排序，用于 `P0 / P1 / P2 / P3` 优先级展示
+
+“可解释因果链”面板字段：
+- `政策/新闻信号数量`：当前维度绑定的证据新闻数量
+- `Baseline`：当前维度的外部基线分
+- `内部敏感度`：当前维度对内部参数变化的敏感程度
+- `Δ 影响`：当前维度的 Delta 分值
+- `Final`：当前维度最终分数
+
+### 9.7 证据链
 - `daily_brief.citations` + `top_drivers.signals`
 - 前端展示支持链接跳转，保证可追溯
+- 竞争矩阵、证据溯源抽屉、新闻库过滤共用同一批 `newsIds/items`，尽量保持计数与内容一致
 
-### 9.4 high_impact 统计口径
+### 9.8 high_impact 统计口径
 - `high_impact` 统计规则：`impact_score >= DAILY_BRIEF_HIGH_IMPACT_THRESHOLD`
 - 当前默认阈值为 `60`（即 `>=60`）
 - 说明：如果当天是 `72/72/65/55`，则 `high_impact = 3`
