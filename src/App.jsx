@@ -262,7 +262,10 @@ function App() {
 
     Promise.all([api.getNewsById(selectedNewsId), api.getRelatedNews(selectedNewsId)]).then(([news, related]) => {
       if (!mounted) return;
-      setSelectedNews(news);
+      setSelectedNews((prev) => {
+        if (news) return news;
+        return prev?.id === selectedNewsId ? prev : null;
+      });
       setRelatedNews(related);
       if (news) {
         const nextRead = storage.markRead(news.id);
@@ -439,7 +442,6 @@ function App() {
     } else {
       setSelectedNewsId(newsOrId);
     }
-    setEvidenceOpen(false);
   };
 
   const onToggleFavorite = (id) => {
