@@ -6,9 +6,10 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 自动抓取外部新闻并结构化入库（`news_raw`）
 - 定时生成公司级决策简报（`daily_brief`）
 - 前端优先展示 `daily_brief`，缺失时回退规则版
+- 新闻库支持服务端平台筛选、分页统计与详情抽屉联动
 - 提供 AI 助手问答（`ai_chat_v2`：Hybrid 检索 + LLM 决策生成）、证据追溯、收入影响沙盘
 - 竞争动态矩阵支持按自定义时间范围聚合并追溯平台证据
-- 生成质量防护：低质量模板句拦截、重试与主题强制改写（避免“空泛结论”覆盖有效结论）
+- 生成质量防护：低质量模板句拦截、截断重试、主题强制改写与行动项 KPI 防编造（避免“空泛结论”或未经验证的数字承诺覆盖有效结论）
 
 ---
 
@@ -40,6 +41,16 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
   - 同日质量守卫（低质量结果不会覆盖明显更高质量结果）
   - 支持按目标日期重生与强制覆盖（用于补跑历史简报）
   - 输入新闻去重与 `max_impact_score` 守卫，减少重复新闻干扰和低质量覆盖
+  - LLM 输出被截断时自动提高 token budget 后重试，避免半截 JSON 或兜底结论写入
+  - 禁止在 `actions` / `success_metric` 中编造线索数、转化率、增长率等具体 KPI；只有新闻事实数字可进入驱动或影响解释
+
+### 2.1.1 线上内容审计状态（2026-04-15）
+- 已对线上 `daily_brief` 全量 53 条记录做质量审计
+- 已重生成明显兜底、低质或与高影响新闻不匹配的历史简报
+- 已批量清理历史行动项中的模型自拟 KPI，统一改为“证据清单 / 演示链路 / 客户反馈 / 话术沉淀”等可解释交付物
+- 2026-04-15 路演版本已人工校正并保持线上生效：
+  - headline：`Amazon卖家成本承压，独立站需抓住迁移窗口`
+  - 核心口径：平台成本与现金流压力上升，独立站 SaaS 应突出卖家迁移、成本透明和多渠道经营
 
 ### 2.2 新闻管道（news pipeline）
 - RSS/网页抓取 -> LLM结构化摘要 -> Supabase 写入 `news_raw`
@@ -73,7 +84,15 @@ AI SaaS Strategic Intelligence Engine（战略决策中枢）
 - 从证据溯源进入新闻详情后，关闭详情可返回上一级证据列表
 - 证据追溯与“去新闻库”共用同一批新闻 ID / 明细，避免计数与展示不一致
 
-### 2.6 数据分析埋点（GA）
+### 2.6 新闻库
+- 新闻库按时间、影响分、风险、地区、平台等条件筛选
+- 平台筛选已下沉到 API / Supabase 查询层，不再只在前端已加载批次内过滤
+- `GET /api/news_raw` 支持 `platform=Amazon` 或逗号分隔多平台筛选，并可配合 `include_total=1` 返回服务端总数
+- 分页加载使用请求版本号与游标锁，避免切换筛选条件后旧请求覆盖新结果
+- 新闻详情按钮直接携带当前卡片对象打开详情，解决筛选/分页后的新闻不在默认缓存中导致点击无反应的问题
+- Daily brief 的“今天”按钮会触发刷新 key，即使日期未变化也会重新拉取线上最新 brief
+
+### 2.7 数据分析埋点（GA）
 - 已接入 Google Analytics 4（GA4），Measurement ID 由 `VITE_GA_ID` 提供。
 - SPA 手动上报 `page_view`（`send_page_view=false`），避免重复统计。
 - 事件封装位于 `src/lib/analytics.ts`，未配置 `VITE_GA_ID` 时自动 no-op，不影响页面功能。
@@ -122,9 +141,10 @@ GA Realtime 验证步骤：
 - timer：`OnCalendar=*-*-* 00,06,12,18:00:00`（6 小时一次）
 - service：同一进程串行执行
   - `python -m news_pipeline.main`
+  - `python -m news_pipeline.competitor_updates`
   - `python -m news_pipeline.daily_brief`
 
-这保证了 `daily_brief` 不会在 `news_raw` 尚未完成时提前执行。  
+这保证了 `daily_brief` 不会在 `news_raw` 和 `competitor_updates` 尚未完成时提前执行。
 GitHub Actions 的 `.github/workflows/news-pipeline.yml` 仅用于手动补跑（`workflow_dispatch`）。
 
 ---
@@ -225,6 +245,7 @@ python -m news_pipeline.daily_brief
 
 - `GET /health`：健康检查
 - `GET /api/news_raw`：代理读取 news_raw
+- `GET /api/news_raw?platform=Amazon&impact_gt=20&include_total=1`：按平台与影响分筛选新闻并返回服务端总数
 - `GET /api/daily_brief`：代理读取 latest daily_brief
 - `POST /api/ai_chat_v2`：AI 助手统一问答入口（结构化 JSON，推荐）
 - `POST /api/ai_chat`：历史兼容接口（SSE 流式）
@@ -290,6 +311,7 @@ python -m news_pipeline.daily_brief
 - `MAX_ENTRIES_PER_FEED`
 - `GOOGLE_WINDOW_DAYS`
 - `DAILY_BRIEF_MAX_TOKENS`
+- `DAILY_BRIEF_RETRY_TOKEN_STEP`（默认 `1000`，LLM 截断后逐次增加输出 token）
 - `DAILY_BRIEF_PROMPT_VERSION`
 - `DAILY_BRIEF_MAX_NEWS`
 - `DAILY_BRIEF_HIGH_IMPACT_THRESHOLD`（默认 `60`，统计口径：`impact_score >= 60`）
@@ -304,6 +326,13 @@ python -m news_pipeline.daily_brief
 ### 9.1 daily_brief 时间窗口
 - 按 UTC+8 切日
 - 查询窗口：`[当天 00:00+8, 次日 00:00+8)`
+
+### 9.1.1 daily_brief 质量护栏
+- 生成侧会优先使用高业务相关性、高影响分和高风险新闻，过滤明显无关噪声
+- 当高影响新闻存在明确主体（如 Amazon、Shopify、TikTok Shop、Temu）时，结论至少在 headline 或 one_liner 中点名主体，避免只写“外部变量”
+- `finish_reason=length` 时视为截断失败，不写入数据库，并在下一次重试提高 token budget
+- 历史质量守卫会阻止低质量结果覆盖高质量结果；但若旧记录被识别为泛化兜底，新结果达到基本质量线即可替换
+- `actions` 和 `success_metric` 只允许写可验证交付物，不允许编造具体线索数、转化率、增长率、签约数量等 KPI
 
 ### 9.2 新闻影响评分（单条新闻）
 
@@ -439,33 +468,41 @@ python -m news_pipeline.daily_brief
 - 新闻库读的是 `news_raw`（准实时）
 - 战略判断读的是 `daily_brief`（批处理快照）
 - 当前生产调度每 6 小时一次，通常会有“分钟级~6小时”更新延迟
+- 若需要立即看今天线上最新 brief，可以点击“今天”按钮触发重新拉取
 
-### 10.5 为什么会出现“明明有新闻但结论太泛”？
+### 10.2 为什么会出现“明明有新闻但结论太泛”？
 - 这通常是 LLM 输出质量波动，不是“未命中新闻”
 - 当前已加反模板保护：
   - 命中新闻充足时拦截泛化句式
   - 自动重试并切换风格
+  - 截断时提高 token budget 重新生成
   - 必要时按当日主题强制改写后再写入
+  - action / success_metric 禁止未经验证的数字 KPI
 - 如仍异常，可手动执行 `python -m news_pipeline.daily_brief` 立即重生当天结论
 
-### 10.2 为什么会出现平台误归类（例如提到 Shopify 但主体不是 Shopify）？
+### 10.3 为什么会出现平台误归类（例如提到 Shopify 但主体不是 Shopify）？
 - 平台识别基于标题/来源规则，已加入 WooCommerce-迁移语义修正
 - 若发现误判，优先完善 `inferPlatform` 和 `isNegatedShopifyTitle` 规则
 
-### 10.3 为什么有时会出现英文标题？
+### 10.4 为什么有时会出现英文标题？
 - 上游新闻可能为英文，历史 `daily_brief` 可能保留英文
 - 当前已增加中文兜底（生成侧 + 展示侧）
 
-### 10.4 为什么 AI 助手会提示“未检索到符合条件的新闻”？
+### 10.5 为什么 AI 助手会提示“未检索到符合条件的新闻”？
 - `ai_chat_v2` 是严格基于数据库检索结果生成
 - 如果给定时间窗（如 `range_days=1`）内没有命中，就会明确提示未命中并建议扩大窗口（如 7 天/30 天）
 - 这属于“可追溯优先”的设计，避免无依据编造
 
-### 10.5 为什么竞争矩阵在扩大时间范围后会出现平台新闻不全？
+### 10.6 为什么竞争矩阵在扩大时间范围后会出现平台新闻不全？
 - 旧版本曾受默认拉取上限影响，大时间范围下可能只看到较新的一部分新闻
 - 当前版本已改为按所选时间范围分页拉全量，再做平台聚合与证据抽屉展示
 
-### 10.6 为什么证据溯源里点“查看详情”会感觉没反应或无法返回？
+### 10.7 为什么新闻库按 Amazon 筛选后数量不对？
+- 旧版本是在前端已加载批次内做平台过滤，所以只会显示当前缓存里的 Amazon 新闻
+- 当前版本已把平台筛选传入 `/api/news_raw` 和 Supabase 查询，统计数量、主新闻区、低影响区和加载更多都使用同一筛选条件
+- 可用 `/api/news_raw?platform=Amazon&impact_gt=20&include_total=1` 直接核验服务端数量
+
+### 10.8 为什么证据溯源里点“查看详情”会感觉没反应或无法返回？
 - 当前版本会保留证据抽屉并在其上层打开新闻详情
 - 关闭新闻详情会回到原来的证据列表，不需要重新打开证据抽屉
 - 若详情接口暂时没补全该条新闻，也不会把已打开的详情内容直接清空
@@ -482,7 +519,7 @@ python -m news_pipeline.daily_brief
 - 仅保留服务器 `systemd` 调度（不依赖 GitHub cron）
 - 定时器：`insight-news-pipeline.timer`
 - 服务：`insight-news-pipeline.service`
-- 执行链路：`main && daily_brief`（严格依赖）
+- 执行链路：`main && competitor_updates && daily_brief`（严格依赖）
 
 可用以下命令核验：
 ```bash
@@ -500,7 +537,7 @@ journalctl -u insight-news-pipeline.service -n 100 --no-pager
 ## 12. 版本与最近更新
 
 近期关键更新：
-- 生产调度统一为服务器 `systemd` 每 6 小时（`main -> daily_brief` 串行）
+- 生产调度统一为服务器 `systemd` 每 6 小时（`main -> competitor_updates -> daily_brief` 串行）
 - AI 助手升级为 `ai_chat_v2`（Hybrid 检索 + LLM 结构化决策生成）
 - AI 助手新增自然语言时间窗推断（近 N 天 / 近 N 月 / 本月以来 / 3 月以来）
 - 所有 AI 回答统一绑定 `sources`（news_id/url/domain/published_at/score）
@@ -510,7 +547,11 @@ journalctl -u insight-news-pipeline.service -n 100 --no-pager
 - 平台归类规则修复（WooCommerce/Shopify 场景）
 - 竞争矩阵支持自定义时间窗全量聚合，证据溯源与新闻库口径统一
 - 证据溯源支持时间倒序、稳定打开详情、详情关闭后返回证据列表
+- 新闻库平台筛选下沉到服务端查询，修复 Amazon 筛选只显示当前缓存批次的问题
+- 新闻详情打开改为直接传递当前新闻对象，修复筛选/分页后部分卡片点击无反应的问题
+- 今日 brief 按钮支持同日期强制刷新，便于生产数据刚更新后立即查看
 - `daily_brief` 增加反模板拦截 + 重试 + 主题强制改写，减少空泛结论
-- `daily_brief` 增加输入新闻去重、历史目标日期补跑、`max_impact_score` 质量守卫
+- `daily_brief` 增加截断重试、输入新闻去重、历史目标日期补跑、`max_impact_score` 质量守卫和行动项 KPI 防编造
+- 2026-04-15 已完成线上 `daily_brief` 全量 53 条审计与历史行动项口径清理
 - 新增 `scripts/audit_daily_brief.mjs` 用于排查 citations 是否遗漏高影响新闻
 - `high_impact` 口径更新为 `impact_score >= 60`
