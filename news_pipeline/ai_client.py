@@ -566,6 +566,18 @@ def generate_json_object(
     if parsed is None:
         parsed = _try_extract_json(clean_text)
 
+    if parsed is None:
+        repaired = _repair_json_via_llm(
+            broken_text=clean_text,
+            title="daily_brief_json",
+            endpoint=endpoint,
+            provider=provider,
+            model=model,
+            api_key=LLM_API_KEY,
+        )
+        if isinstance(repaired, dict):
+            parsed = repaired
+
     return {
         "ok": isinstance(parsed, dict),
         "data": parsed or {},

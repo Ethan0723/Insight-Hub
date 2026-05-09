@@ -84,10 +84,11 @@ function inferPlatform(title: string, source = '', originalUrl = ''): string {
   if (isOfficial(['newsroom.tiktok.com', 'tiktok.com'])) return 'TikTok Shop';
   if (isOfficial(['temu.com', 'pddholdings.com'])) return 'Temu';
 
-  // Non-official sources: only map when platform is clearly headline subject and not negated.
-  if (!hasNegatedShopify && /^(shopify|\[shopify\]|shopify[:：-])/.test(t)) return 'Shopify';
+  // Non-official sources: keep the match conservative, but do not require the
+  // platform keyword to appear only at the headline start.
+  if (!hasNegatedShopify && /\bshopify\b/.test(t)) return 'Shopify';
   if (/^(amazon|\[amazon\]|amazon[:：-])/.test(t)) return 'Amazon';
-  if (/^(tiktok|tiktok shop|\[tiktok\]|tiktok[:：-])/.test(t)) return 'TikTok Shop';
+  if (/\btiktok(\s+shop)?\b/.test(t)) return 'TikTok Shop';
   if (/^(temu|\[temu\]|temu[:：-])/.test(t)) return 'Temu';
 
   return 'Global';
@@ -260,10 +261,112 @@ function toNewsItem(row: any): NewsItem {
   };
 }
 
+function normalizeUrlForDedupe(raw: string): string {
+  try {
+    const url = new URL(String(raw || '').trim());
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return `${url.hostname.toLowerCase()}${pathname}`;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeTextForDedupe(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/amazon|亚马逊/g, ' amazon ')
+    .replace(/shopify/g, ' shopify ')
+    .replace(/tiktok shop|tiktok|抖音/g, ' tiktok ')
+    .replace(/temu/g, ' temu ')
+    .replace(/fba/g, ' fba ')
+    .replace(/燃油附加费|燃油及物流附加费|物流附加费|附加费/g, ' surcharge ')
+    .replace(/%/g, ' percent ')
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildBigrams(text: string): Set<string> {
+  const compact = text.replace(/\s+/g, '');
+  const out = new Set<string>();
+  if (!compact) return out;
+  if (compact.length === 1) {
+    out.add(compact);
+    return out;
+  }
+  for (let i = 0; i < compact.length - 1; i += 1) {
+    out.add(compact.slice(i, i + 2));
+  }
+  return out;
+}
+
+function bigramSimilarity(a: string, b: string): number {
+  const aSet = buildBigrams(a);
+  const bSet = buildBigrams(b);
+  if (!aSet.size || !bSet.size) return 0;
+  let intersection = 0;
+  aSet.forEach((token) => {
+    if (bSet.has(token)) intersection += 1;
+  });
+  const union = new Set([...aSet, ...bSet]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+function daysBetween(a: string, b: string): number {
+  const aMs = Date.parse(a || '') || 0;
+  const bMs = Date.parse(b || '') || 0;
+  if (!aMs || !bMs) return Number.POSITIVE_INFINITY;
+  return Math.abs(aMs - bMs) / (24 * 60 * 60 * 1000);
+}
+
+function pickPreferredNewsItem(current: NewsItem, candidate: NewsItem): NewsItem {
+  if ((candidate.impactScore || 0) !== (current.impactScore || 0)) {
+    return (candidate.impactScore || 0) > (current.impactScore || 0) ? candidate : current;
+  }
+  const candidateTs = Date.parse(candidate.createdAt || candidate.publishDate || '') || 0;
+  const currentTs = Date.parse(current.createdAt || current.publishDate || '') || 0;
+  return candidateTs >= currentTs ? candidate : current;
+}
+
+function areLikelyDuplicateNews(a: NewsItem, b: NewsItem): boolean {
+  const urlA = normalizeUrlForDedupe(a.originalUrl);
+  const urlB = normalizeUrlForDedupe(b.originalUrl);
+  if (urlA && urlB && urlA === urlB) return true;
+
+  const titleA = normalizeTextForDedupe(a.title);
+  const titleB = normalizeTextForDedupe(b.title);
+  const summaryA = normalizeTextForDedupe(`${a.title} ${a.aiTldr} ${a.summary}`);
+  const summaryB = normalizeTextForDedupe(`${b.title} ${b.aiTldr} ${b.summary}`);
+  const titleSimilarity = bigramSimilarity(titleA, titleB);
+  const summarySimilarity = bigramSimilarity(summaryA, summaryB);
+  const samePlatform = a.platform === b.platform || a.platform === 'Global' || b.platform === 'Global';
+  const nearPublishDay = daysBetween(a.publishDate, b.publishDate) <= 2;
+
+  return samePlatform && nearPublishDay && (titleSimilarity >= 0.72 || summarySimilarity >= 0.68);
+}
+
+function dedupeNewsItems(list: NewsItem[]): NewsItem[] {
+  const deduped: NewsItem[] = [];
+  const sorted = [...list].sort((a, b) => {
+    const impactDiff = (b.impactScore || 0) - (a.impactScore || 0);
+    if (impactDiff !== 0) return impactDiff;
+    return (Date.parse(b.createdAt || b.publishDate || '') || 0) - (Date.parse(a.createdAt || a.publishDate || '') || 0);
+  });
+
+  sorted.forEach((item) => {
+    const hitIndex = deduped.findIndex((existing) => areLikelyDuplicateNews(existing, item));
+    if (hitIndex === -1) {
+      deduped.push(item);
+      return;
+    }
+    deduped[hitIndex] = pickPreferredNewsItem(deduped[hitIndex], item);
+  });
+
+  return deduped;
+}
+
 function isClearlyIrrelevant(item: NewsItem): boolean {
   const lowConfidenceSignals = [
-    '信息不足',
-    '判断置信度较低',
     '模型未返回合法 json',
     '待翻译',
     'low confidence'
@@ -307,6 +410,78 @@ function paginate<T>(list: T[], page = 1, pageSize = 9): PagedResult<T> {
     page,
     pageSize
   };
+}
+
+function toCompetitorUpdate(row: any) {
+  const publishedAt = String(row.published_at || row.effective_at || row.detected_at || row.created_at || '');
+  const rawPayload = safeParseJsonValue(row.raw_payload) || {};
+  return {
+    id: String(row.id || ''),
+    platform: String(row.platform || 'Shopify'),
+    sourceType: String(row.source_type || 'product_changelog'),
+    sourceName: String(row.source_name || ''),
+    sourceUrl: String(row.source_url || ''),
+    detailUrl: String(row.detail_url || ''),
+    title: String(row.title || 'Untitled'),
+    summary: String(row.summary || ''),
+    content: String(row.content || ''),
+    rawPayload,
+    originalTitle: String(rawPayload?.original_title || ''),
+    originalSummary: String(rawPayload?.original_summary || ''),
+    originalContent: String(rawPayload?.original_content || ''),
+    publishedAt,
+    effectiveAt: String(row.effective_at || ''),
+    detectedAt: String(row.detected_at || ''),
+    lastCheckedAt: String(row.last_checked_at || ''),
+    eventType: String(row.event_type || 'product_update'),
+    updateLabel: String(row.update_label || ''),
+    productArea: String(row.product_area || 'Platform'),
+    status: String(row.status || 'new'),
+    competitiveImpact: String(row.competitive_impact || '中'),
+    impactReason: String(row.impact_reason || ''),
+    gapAssumption: String(row.gap_assumption || ''),
+    recommendedAction: String(row.recommended_action || ''),
+    importanceScore: Number(row.importance_score || 0),
+    createdAt: String(row.created_at || ''),
+    updatedAt: String(row.updated_at || ''),
+    displayDate: publishedAt ? publishedAt.slice(0, 10) : ''
+  };
+}
+
+async function fetchCompetitorUpdatesPage(params: {
+  offset: number;
+  limit: number;
+  includeTotal?: boolean;
+  platform?: string;
+  sourceType?: string;
+  eventType?: string;
+  competitiveImpact?: string;
+  keyword?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<{ rows: any[]; total: number }> {
+  const search = new URLSearchParams();
+  search.set('offset', String(Math.max(0, params.offset)));
+  search.set('limit', String(Math.max(1, Math.min(1000, params.limit))));
+  if (params.includeTotal) search.set('include_total', '1');
+  if (params.platform) search.set('platform', params.platform);
+  if (params.sourceType) search.set('source_type', params.sourceType);
+  if (params.eventType) search.set('event_type', params.eventType);
+  if (params.competitiveImpact) search.set('competitive_impact', params.competitiveImpact);
+  if (params.keyword) search.set('keyword', params.keyword);
+  if (params.dateFrom) search.set('date_from', params.dateFrom);
+  if (params.dateTo) search.set('date_to', params.dateTo);
+
+  const res = await fetchWithTimeout(`/api/competitor_updates?${search.toString()}`);
+  if (!res.ok) throw new Error(`competitor_updates proxy http ${res.status}`);
+  const body = await res.json();
+  if (params.includeTotal && body && typeof body === 'object') {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    const total = Number.isFinite(Number(body.total)) ? Number(body.total) : rows.length;
+    return { rows, total };
+  }
+  const rows = Array.isArray(body) ? body : [];
+  return { rows, total: rows.length };
 }
 
 function filterNews(list: NewsItem[], query: NewsQuery = {}): NewsItem[] {
@@ -504,6 +679,17 @@ function toDailyBriefCitation(value: unknown, newsMap: Map<string, NewsItem>, id
   };
 }
 
+function hasReadableCitationTitles(citations: StrategyBrief['citations'] | undefined): boolean {
+  if (!Array.isArray(citations) || !citations.length) return false;
+  return citations.some((item) => {
+    const title = String(item?.title || '').trim();
+    if (!title) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(title)) return false;
+    if (/^brief-\d+$/i.test(title)) return false;
+    return true;
+  });
+}
+
 function hasCjk(text: string): boolean {
   return /[\u4e00-\u9fff]/.test(text);
 }
@@ -535,12 +721,14 @@ function mapDailyBriefToStrategyBrief(row: any, news: NewsItem[]): StrategyBrief
   const citationsRaw = safeParseJsonValue(row.citations);
   const statsRaw = safeParseJsonValue(row.stats);
 
-  const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any) => ({
+  const topDrivers = (Array.isArray(topDriversRaw) ? topDriversRaw : []).slice(0, 5).map((driver: any, idx: number) => ({
+    id: `daily-brief-driver-${idx}`,
     title: chineseOrFallback(String(driver?.title || ''), '外部信号变化'),
-    source: 'LLM综合',
+    source: 'daily_brief',
     impact_score: 0,
     risk_level: '中' as const,
-    why: chineseOrFallback(String(driver?.why_it_matters || ''), '该信号将影响近期经营决策。')
+    why: chineseOrFallback(String(driver?.why_it_matters || ''), '该信号将影响近期经营决策。'),
+    signals: Array.isArray(driver?.signals) ? driver.signals.map((item: unknown) => String(item || '').trim()).filter(Boolean) : []
   }));
 
   const actions = (Array.isArray(actionsRaw) ? actionsRaw : [])
@@ -654,7 +842,7 @@ async function fetchFromSupabaseRaw(
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
   runtimeDataSource = 'supabase_direct';
-  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+  return dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item)));
 }
 
 async function fetchFromServerProxyRaw(
@@ -678,7 +866,7 @@ async function fetchFromServerProxyRaw(
   const rows = await res.json();
   if (!Array.isArray(rows)) return [];
   runtimeDataSource = 'server_proxy';
-  return rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item));
+  return dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)).filter((item) => !isClearlyIrrelevant(item)));
 }
 
 async function getSupabaseNewsCached(
@@ -711,6 +899,37 @@ async function getSupabaseNewsCached(
 
   cachePending = task;
   return task;
+}
+
+async function getMatrixNews(params: { dateFrom?: string; dateTo?: string; recentDays?: number }): Promise<NewsItem[]> {
+  const { dateFrom, dateTo, recentDays = 7 } = params;
+  const hasExplicitRange = Boolean(dateFrom || dateTo);
+
+  if (!hasExplicitRange) {
+    return getRealOrMockNews(false, SUPABASE_LIMIT, true, recentDays, dateFrom, dateTo);
+  }
+
+  const total = await api.getNewsTotal(dateFrom, dateTo);
+  if (!Number.isFinite(total) || total <= 0) return [];
+
+  const batchSize = 500;
+  const offsets: number[] = [];
+  for (let offset = 0; offset < total; offset += batchSize) {
+    offsets.push(offset);
+  }
+
+  const batches = await Promise.all(
+    offsets.map((offset) =>
+      api.getNewsBatch({
+        offset,
+        limit: batchSize,
+        dateFrom,
+        dateTo
+      })
+    )
+  );
+
+  return dedupeNewsItems(batches.flatMap((batch) => batch.list));
 }
 
 function fallbackNews(): NewsItem[] {
@@ -829,12 +1048,11 @@ function topDimensions(news: NewsItem[]) {
   return Object.keys(counter).sort((a, b) => counter[b] - counter[a]).slice(0, 2);
 }
 
-function buildDailyStrategyBrief(news: NewsItem[]) {
-  const todayKey = toUtc8DateKey(Date.now());
-  const todayNews = news
+function buildDailyStrategyBrief(news: NewsItem[], dayKey = utc8TodayKey()) {
+  const todayNews = dedupeNewsItems(news)
     .filter((item) => {
       const created = Date.parse(item.createdAt || item.publishDate || '') || 0;
-      return toUtc8DateKey(created) === todayKey;
+      return toUtc8DateKey(created) === dayKey;
     })
     .filter((item) => !isLowConfidenceInsight(item))
     .sort((a, b) => {
@@ -894,7 +1112,7 @@ function buildDailyStrategyBrief(news: NewsItem[]) {
   const hasHighRisk = highQuality.some((entry) => entry.item.riskLevel === '高');
   const caseType: 'A' | 'B' = directSignals.length > 0 ? 'A' : 'B';
   const headlinePool = caseType === 'A' ? HEADLINE_POOL_A : HEADLINE_POOL_B;
-  const headline = headlinePool[hashIndex(`${todayKey}-${dominantDimensions.join('-')}-${highQuality.length}`, headlinePool.length)];
+  const headline = headlinePool[hashIndex(`${dayKey}-${dominantDimensions.join('-')}-${highQuality.length}`, headlinePool.length)];
 
   const sourceSet = caseType === 'A' ? directSignals : macroSignals;
   const driverSource = (sourceSet.length ? sourceSet : withSignalType).slice(0, 5);
@@ -974,7 +1192,11 @@ function buildDailyStrategyBrief(news: NewsItem[]) {
 
   return {
     headline,
-    time_window: '今天',
+    one_liner:
+      caseType === 'A'
+        ? `今日高影响信号集中在${dominantDimensions.join('、')}，建议先处理支付、履约与商业化链路中的直接传导风险。`
+        : '今日以外围与观察型信号为主，建议先跟踪关键指标，再逐步验证是否需要放大动作。',
+    time_window: toUtc8WindowLabel(dayKey),
     signal_case: caseType,
     top_drivers: topDrivers,
     top_news: topNews,
@@ -984,6 +1206,37 @@ function buildDailyStrategyBrief(news: NewsItem[]) {
     impact_on_revenue_model: revenueImpact,
     meta
   };
+}
+
+function isFallbackLikeDailyBrief(brief: StrategyBrief | null | undefined): boolean {
+  if (!brief) return false;
+  const headline = String(brief.headline || '').trim();
+  const oneLiner = String(brief.one_liner || '').trim();
+  const topAction = String(brief.actions?.[0]?.action || '').trim();
+  const merchantDemand = String(brief.impacts?.merchant_demand || '').trim();
+  const paymentsRisk = String(brief.impacts?.payments_risk || '').trim();
+  const competition = String(brief.impacts?.competition || '').trim();
+
+  let hits = 0;
+  if (/波动加剧，先做可逆验证与预案$/.test(headline)) hits += 2;
+  if (oneLiner.startsWith('当日信号主要集中在')) hits += 1;
+  if (topAction === '锁定高风险信号并启动跨团队应急同步。') hits += 1;
+  if (merchantDemand.includes('无新增集中冲击')) hits += 1;
+  if (paymentsRisk.includes('支付风险无新增高压事件')) hits += 1;
+  if (competition.includes('竞争面暂未出现确定性变盘')) hits += 1;
+  return hits >= 3;
+}
+
+async function buildRuleBasedBriefForDate(dayKey: string): Promise<StrategyBrief | null> {
+  try {
+    const news = await getRealOrMockNews(false, SUPABASE_LIMIT, true, null, dayKey, dayKey);
+    if (!Array.isArray(news) || news.length === 0) return null;
+    const brief = buildDailyStrategyBrief(news, dayKey);
+    return brief.meta?.news_count_used ? brief : null;
+  } catch (err) {
+    console.warn('[api] buildRuleBasedBriefForDate failed.', err);
+    return null;
+  }
 }
 function buildDailyInsight(news: NewsItem[]): DailyInsight {
   if (news.length === 0) return mockDailyInsight;
@@ -1107,8 +1360,7 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
       .filter((item) => item.platform === platform)
       .filter((item) => (platform === 'Shopify' ? !isShopifyFalsePositive(item) : true))
       .filter((item) => !isLowConfidenceInsight(item))
-      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime())
-      .slice(0, 4);
+      .sort((a, b) => b.impactScore - a.impactScore || new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime());
     const first = rows[0];
     const fallback = `暂无 ${platform} 最新事件，建议继续追踪。`;
     const evidenceIds = rows.map((item) => item.id);
@@ -1149,7 +1401,8 @@ function buildMatrix(news: NewsItem[]): MatrixRow[] {
       evidence: {
         id: `ev-m-${platform.toLowerCase().replace(/\s+/g, '-')}`,
         title: `${platform} 竞争引用`,
-        newsIds: evidenceIds
+        newsIds: evidenceIds,
+        items: rows
       }
     };
   });
@@ -1324,14 +1577,21 @@ export const api = {
 
   async getDailyInsight(): Promise<DailyInsight> {
     await delay(180);
-    const newsPromise = getRealOrMockNews().catch((err) => {
+    const dayKey = utc8TodayKey();
+    const newsPromise = getRealOrMockNews(false, SUPABASE_LIMIT, true, null, dayKey, dayKey).catch((err) => {
       console.warn('[api] getDailyInsight news fetch failed, fallback to brief-only path.', err);
       return [];
     });
 
     // First load daily_brief directly, do not block on news_raw latency.
-    const brief = await getDailyBriefFromData([]);
+    let brief = await getDailyBriefFromData([], dayKey);
     const news = await Promise.race([newsPromise, delay(1800).then(() => [])]);
+    if (brief && isFallbackLikeDailyBrief(brief) && news.length > 0) {
+      const ruleBased = buildDailyStrategyBrief(news, dayKey);
+      if (ruleBased.meta?.news_count_used) {
+        brief = ruleBased;
+      }
+    }
     const fallback = news.length > 0 ? buildDailyInsight(news) : mockDailyInsight;
     if (!brief) return fallback;
     return {
@@ -1346,32 +1606,36 @@ export const api = {
 
   async getDailyBrief(date?: string): Promise<StrategyBrief | null> {
     await delay(130);
-    const newsPromise = getRealOrMockNews().catch((err) => {
+    const dayKey = (date || utc8TodayKey()).slice(0, 10);
+    const newsPromise = getRealOrMockNews(false, SUPABASE_LIMIT, true, null, dayKey, dayKey).catch((err) => {
       console.warn('[api] getDailyBrief news fetch failed, return brief without citation enrichment.', err);
       return [];
     });
-    const brief = await getDailyBriefFromData([], date);
+    let brief = await getDailyBriefFromData([], dayKey);
     if (!brief) {
       const news = await newsPromise;
-      return getDailyBriefFromData(news, date);
+      const hydrated = await getDailyBriefFromData(news, dayKey);
+      if (hydrated) return hydrated;
+      return buildDailyStrategyBrief(news, dayKey);
+    }
+    if (brief.meta?.brief_source === 'daily_brief' && !hasReadableCitationTitles(brief.citations)) {
+      const news = await newsPromise;
+      if (news.length > 0) {
+        const enriched = await getDailyBriefFromData(news, dayKey);
+        if (enriched) brief = enriched;
+      }
+    }
+    if (brief && isFallbackLikeDailyBrief(brief)) {
+      const ruleBased = await buildRuleBasedBriefForDate(dayKey);
+      if (ruleBased) return ruleBased;
     }
     return brief;
   },
 
   async getMatrix(params: { dateFrom?: string; dateTo?: string; recentDays?: number } = {}): Promise<MatrixRow[]> {
     await delay(150);
-    const { dateFrom, dateTo, recentDays = 7 } = params;
     try {
-      return buildMatrix(
-        await getRealOrMockNews(
-          false,
-          SUPABASE_LIMIT,
-          true,
-          dateFrom || dateTo ? null : recentDays,
-          dateFrom,
-          dateTo
-        )
-      );
+      return buildMatrix(await getMatrixNews(params));
     } catch (err) {
       console.warn('[api] getMatrix failed, fallback to mock matrix.', err);
       return mockMatrix;
@@ -1441,7 +1705,35 @@ export const api = {
     });
     return {
       fetchedCount: rows.length,
-      list: rows.map(toNewsItem).filter((item) => Boolean(item.id))
+      list: dedupeNewsItems(rows.map(toNewsItem).filter((item) => Boolean(item.id)))
     };
+  },
+
+  async getCompetitorUpdates(params: {
+    offset?: number;
+    limit?: number;
+    platform?: string;
+    sourceType?: string;
+    eventType?: string;
+    competitiveImpact?: string;
+    keyword?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } = {}) {
+    await delay(80);
+    const { rows, total } = await fetchCompetitorUpdatesPage({
+      offset: params.offset || 0,
+      limit: params.limit || 100,
+      includeTotal: true,
+      platform: params.platform,
+      sourceType: params.sourceType,
+      eventType: params.eventType,
+      competitiveImpact: params.competitiveImpact,
+      keyword: params.keyword,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo
+    });
+    const list = rows.map(toCompetitorUpdate).filter((item) => item.id);
+    return { list, total, fetchedCount: rows.length };
   }
 };

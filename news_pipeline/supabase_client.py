@@ -48,6 +48,75 @@ def insert_news_raw(data: dict[str, Any]) -> dict[str, Any]:
     return inserted[0] if inserted else {}
 
 
+def upsert_competitor_update(data: dict[str, Any]) -> dict[str, Any]:
+    """Upsert one competitor update by canonical key."""
+    response = (
+        _client.table("competitor_updates")
+        .upsert(data, on_conflict="canonical_key")
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else {}
+
+
+def get_competitor_update_by_canonical_key(canonical_key: str) -> dict[str, Any] | None:
+    """Return an existing competitor update by canonical key, or None if not found."""
+    response = (
+        _client.table("competitor_updates")
+        .select("id,canonical_key,content_hash")
+        .eq("canonical_key", canonical_key)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def update_competitor_update_lightweight(canonical_key: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Update lightweight metadata for an unchanged competitor update."""
+    response = (
+        _client.table("competitor_updates")
+        .update(data)
+        .eq("canonical_key", canonical_key)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else {}
+
+
+def fetch_competitor_updates_for_normalization(limit: int = 300) -> list[dict[str, Any]]:
+    """Fetch competitor updates that still need Chinese title/content normalization."""
+    try:
+        response = (
+            _client.table("competitor_updates")
+            .select(
+                "id,platform,source_type,source_name,source_url,detail_url,title,summary,content,raw_payload,"
+                "published_at,effective_at,event_type,update_label,product_area,status,competitive_impact,"
+                "impact_reason,gap_assumption,recommended_action,importance_score,content_hash,canonical_key"
+            )
+            .order("published_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows = response.data or []
+        needs: list[dict[str, Any]] = []
+        for row in rows:
+            title = str(row.get("title") or "")
+            content = str(row.get("content") or "")
+            summary = str(row.get("summary") or "")
+            if (
+                "待翻译" in title
+                or (title and not any("\u4e00" <= ch <= "\u9fff" for ch in title))
+                or (content and not any("\u4e00" <= ch <= "\u9fff" for ch in content))
+                or (summary and not any("\u4e00" <= ch <= "\u9fff" for ch in summary))
+            ):
+                needs.append(row)
+        return needs
+    except Exception as exc:
+        print(f"[WARN] fetch_competitor_updates_for_normalization failed | error={exc}")
+        return []
+
+
 
 def update_summary(news_id: str, summary: dict[str, Any] | str) -> None:
     """Update summary JSONB and denormalized fields for a news_raw record.

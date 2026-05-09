@@ -236,12 +236,40 @@ function tryExtractJsonObject(text) {
   return null;
 }
 
+function normalizeAssistantField(text) {
+  return normalizeCompanyLabel(text)
+    .replace(/\\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function sanitizeLine(text) {
   return String(text || '')
     .replace(/\r/g, '')
     .replace(/[#*`>-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function utc8DayBoundaryIso(dayKey, endOfDay = false) {
+  const day = String(dayKey || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+  const suffix = endOfDay ? 'T23:59:59.999+08:00' : 'T00:00:00.000+08:00';
+  const date = new Date(`${day}${suffix}`);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function normalizeCompanyLabel(text) {
+  return String(text || '')
+    .replace(/自有平台/g, '公司')
+    .replace(/我们平台/g, '公司')
+    .replace(/我们的平台/g, '公司')
+    .replace(/我们在/g, '公司在')
+    .replace(/若我们/g, '若公司')
+    .replace(/如果我们/g, '如果公司')
+    .replace(/我们缺少/g, '公司缺少')
+    .replace(/我们没有/g, '公司没有')
+    .replace(/我们/g, '公司');
 }
 
 function extractDomain(url) {
@@ -254,6 +282,40 @@ function extractDomain(url) {
 
 function clamp(num, min, max) {
   return Math.min(Math.max(Number(num) || 0, min), max);
+}
+
+function inferRangeDaysFromQuery(query) {
+  const text = sanitizeLine(query);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const monthSinceMatch = text.match(/(?:(\d{4})年)?\s*(\d{1,2})月(?:份)?以来/);
+  if (monthSinceMatch) {
+    const year = Number(monthSinceMatch[1] || currentYear);
+    const month = Number(monthSinceMatch[2]);
+    if (month >= 1 && month <= 12) {
+      const start = new Date(year, month - 1, 1);
+      const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      return clamp(diffDays, 1, 180);
+    }
+  }
+
+  if (/本月以来|这个月以来|当月以来/.test(text)) {
+    const start = new Date(currentYear, now.getMonth(), 1);
+    const diffDays = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return clamp(diffDays, 1, 180);
+  }
+
+  const dayMatch = text.match(/(?:近|最近|过去)\s*(\d{1,3})\s*天/);
+  if (dayMatch) return clamp(Number(dayMatch[1] || 3), 1, 180);
+
+  const monthMatch = text.match(/(?:近|最近|过去)\s*(\d{1,2})\s*个?月/);
+  if (monthMatch) return clamp(Number(monthMatch[1] || 1) * 30, 1, 180);
+
+  if (/一周|近7天|最近7天|过去7天|7天/.test(text)) return 7;
+  if (/近3天|最近3天|过去3天|三天/.test(text)) return 3;
+  if (/今天|今日/.test(text)) return 1;
+  return null;
 }
 
 function dedupeByUrl(rows) {
@@ -271,6 +333,63 @@ function dedupeByUrl(rows) {
     if (curTs > prevTs) map.set(key, row);
   });
   return Array.from(map.values());
+}
+
+const PLATFORM_ALIASES = {
+  shopify: ['shopify'],
+  amazon: ['amazon', '亚马逊'],
+  temu: ['temu'],
+  tiktok: ['tiktok', 'tik tok', 'tiktok shop', '抖音'],
+  shopline: ['shopline']
+};
+
+function detectPlatformFocus(query) {
+  const text = sanitizeLine(query).toLowerCase();
+  return Object.entries(PLATFORM_ALIASES)
+    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
+    .map(([platform]) => platform);
+}
+
+function applyPlatformFocus(ranked, query) {
+  const focusedPlatforms = detectPlatformFocus(query);
+  if (!focusedPlatforms.length) return ranked;
+
+  const matched = ranked.filter((item) => {
+    const haystack = `${item.title}\n${item.summary}\n${item.content}\n${item.source}\n${item.domain}`.toLowerCase();
+    return focusedPlatforms.some((platform) =>
+      (PLATFORM_ALIASES[platform] || []).some((alias) => haystack.includes(alias))
+    );
+  });
+
+  return matched.length > 0 ? matched : ranked;
+}
+
+function isCompetitorUpdateQuery(query) {
+  return /竞品|竞争对手|官方动态|官方更新|产品动态|产品更新|changelog|shopline|shopify/i.test(String(query || ''));
+}
+
+function normalizeCompetitorUpdateDateFields(row) {
+  const copy = { ...(row || {}) };
+  const publishedAt = String(copy.published_at || '').trim();
+  const publishedTs = Date.parse(publishedAt);
+  const isFuturePublishedAt = Number.isFinite(publishedTs) && publishedTs > Date.now() + 60 * 60 * 1000;
+  if (isFuturePublishedAt) {
+    copy.effective_at = copy.effective_at || publishedAt;
+    copy.published_at = copy.detected_at || copy.created_at || '';
+  }
+  return copy;
+}
+
+function normalizeCompetitorUpdateTextFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  return {
+    ...row,
+    summary: normalizeCompanyLabel(row.summary || ''),
+    content: normalizeCompanyLabel(row.content || ''),
+    impact_reason: normalizeCompanyLabel(row.impact_reason || ''),
+    gap_assumption: normalizeCompanyLabel(row.gap_assumption || ''),
+    recommended_action: normalizeCompanyLabel(row.recommended_action || '')
+  };
 }
 
 function detectIntentByRule(query) {
@@ -547,11 +666,65 @@ async function fetchNewsCandidatesV2({ days = 7, limit = 200 }) {
   }
   if (!res.ok) throw new Error(`news candidate query failed ${res.status}: ${text.slice(0, 180)}`);
   const rows = safeJsonParse(text, []);
-  return Array.isArray(rows) ? rows : [];
+  return (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, source_type: 'news_raw' }));
+}
+
+async function fetchCompetitorUpdateCandidatesV2({ days = 7, limit = 200 }) {
+  const cutoff = new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000).toISOString();
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/competitor_updates`);
+  upstreamUrl.searchParams.set(
+    'select',
+    'id,platform,source_type,source_name,source_url,detail_url,title,summary,content,published_at,effective_at,detected_at,event_type,product_area,competitive_impact,impact_reason,gap_assumption,recommended_action,importance_score,created_at'
+  );
+  upstreamUrl.searchParams.set('or', `(published_at.gte.${cutoff},effective_at.gte.${cutoff},detected_at.gte.${cutoff},created_at.gte.${cutoff})`);
+  upstreamUrl.searchParams.set('order', 'published_at.desc.nullslast,effective_at.desc.nullslast,detected_at.desc');
+  upstreamUrl.searchParams.set('limit', String(clamp(limit, 30, 500)));
+
+  const res = await fetch(upstreamUrl.toString(), {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`competitor update query failed ${res.status}: ${text.slice(0, 180)}`);
+  const rows = safeJsonParse(text, []);
+
+  return (Array.isArray(rows) ? rows : []).map((rawRow) => {
+    const row = normalizeCompetitorUpdateDateFields(rawRow);
+    const publishedAt = String(row?.published_at || row?.effective_at || row?.detected_at || row?.created_at || '');
+    const detailUrl = String(row?.detail_url || row?.source_url || '');
+    const sourceName = sanitizeLine(row?.source_name || row?.platform || 'Competitor official update');
+    const analysis = [
+      row?.summary,
+      row?.content,
+      row?.impact_reason ? `影响判断：${normalizeCompanyLabel(row.impact_reason)}` : '',
+      row?.gap_assumption ? `差距假设：${normalizeCompanyLabel(row.gap_assumption)}` : '',
+      row?.recommended_action ? `建议动作：${normalizeCompanyLabel(row.recommended_action)}` : ''
+    ].filter(Boolean).join('\n');
+
+    return {
+      id: row?.id,
+      title: sanitizeLine(row?.title || ''),
+      url: detailUrl,
+      source: sourceName,
+      publish_time: publishedAt,
+      created_at: String(row?.created_at || ''),
+      summary: sanitizeLine(normalizeCompanyLabel(row?.summary || '')),
+      content: analysis,
+      impact_score: Number(row?.importance_score || 0),
+      risk_level: sanitizeLine(row?.competitive_impact || ''),
+      platform: sanitizeLine(row?.platform || ''),
+      product_area: sanitizeLine(row?.product_area || ''),
+      event_type: sanitizeLine(row?.event_type || ''),
+      source_type: 'competitor_update'
+    };
+  });
 }
 
 function rankNewsHybrid({ query, candidates, expansion }) {
   const now = Date.now();
+  const competitorFocused = isCompetitorUpdateQuery(query);
   const terms = [
     sanitizeLine(query).toLowerCase(),
     ...(Array.isArray(expansion?.topic_tags) ? expansion.topic_tags : []).map((v) => sanitizeLine(v).toLowerCase()),
@@ -580,7 +753,8 @@ function rankNewsHybrid({ query, candidates, expansion }) {
     const daysAgo = Math.max(0, (now - ts) / (1000 * 60 * 60 * 24));
     const timeDecay = Math.max(0.2, 1 - daysAgo / 14);
     const semanticProxy = keywordScore > 0 ? Math.min(2.2, keywordScore * 0.6) : 0;
-    const total = keywordScore * 1.8 + semanticProxy + timeDecay + impact * 0.02 + riskScore;
+    const sourceBoost = row?.source_type === 'competitor_update' && competitorFocused ? 4 : 0;
+    const total = keywordScore * 1.8 + semanticProxy + timeDecay + impact * 0.02 + riskScore + sourceBoost;
 
     return {
       news_id: String(row?.id || ''),
@@ -591,12 +765,15 @@ function rankNewsHybrid({ query, candidates, expansion }) {
       source: sanitizeLine(row?.source || ''),
       summary: sanitizeLine(typeof row?.summary === 'string' ? row.summary : ''),
       content: sanitizeLine(content).slice(0, 500),
+      source_type: String(row?.source_type || 'news_raw'),
       score: Number(total.toFixed(3))
     };
   });
 
-  return dedupeByUrl(scored)
+  const ranked = dedupeByUrl(scored)
     .sort((a, b) => b.score - a.score || (Date.parse(b.published_at) || 0) - (Date.parse(a.published_at) || 0));
+
+  return applyPlatformFocus(ranked, query);
 }
 
 function buildContextFromSources(sources, maxN = 12) {
@@ -605,6 +782,7 @@ function buildContextFromSources(sources, maxN = 12) {
     title: item.title,
     url: item.url,
     domain: item.domain || extractDomain(item.url),
+    source_type: item.source_type || 'news_raw',
     published_at: item.published_at,
     summary: item.summary || item.content || '',
     score: item.score
@@ -632,6 +810,10 @@ async function generateAssistantAnswer({ query, intent, contextSources, briefCon
 - answer 用中文，聚焦管理层决策，可执行。
 - actions 1-3条，优先级用 P0/P1/P2。
 - 不要 Markdown。
+- 提及我方主体时统一使用“公司”。
+- 不要使用“自有平台”“我们平台”“我们的平台”“我们”等表述。
+- 所有字段都只能是纯文本短句，不要包含 JSON、代码块、编号列表、换行符或 \\n。
+- key_drivers 和 impacts 每条控制在 35 字以内，actions.title 每条控制在 24 字以内。
 
 用户问题：${query}
 意图：${intent}
@@ -650,22 +832,45 @@ context 新闻：${JSON.stringify(contextSources)}
     maxTokens: 1500
   });
   const parsed = tryExtractJsonObject(content);
-  if (!parsed || typeof parsed !== 'object') throw new Error('invalid ai_chat_v2 json');
+  if (!parsed || typeof parsed !== 'object') {
+    const titles = contextSources.slice(0, 3).map((item) => item.title).filter(Boolean);
+    return {
+      answer: `已检索到 ${contextSources.length} 条相关信号，模型输出格式不稳定；以下按命中来源给出保底摘要。`,
+      cards: {
+        headline: sanitizeLine(titles[0] || `${sanitizeLine(query)} 命中 ${contextSources.length} 条相关信号`),
+        key_drivers: titles.slice(0, 3).map((title) => sanitizeLine(normalizeAssistantField(title))),
+        impacts: [
+          `时间窗口内共命中 ${retrieval?.returned ?? contextSources.length} 条相关信号`,
+          `检索策略为 ${sanitizeLine(retrieval?.strategy || 'hybrid')}`,
+          `建议结合引用来源继续核验关键结论`
+        ].filter(Boolean),
+        actions: [
+          {
+            priority: 'P1',
+            title: '复核引用新闻并确认关键结论',
+            why: '本次已完成检索，但模型输出格式异常，需先基于已命中来源做人工复核以避免误判',
+            owner_suggest: '数据分析团队',
+            timeframe: '24h'
+          }
+        ]
+      }
+    };
+  }
 
   const cards = parsed.cards && typeof parsed.cards === 'object' ? parsed.cards : {};
   return {
-    answer: sanitizeLine(parsed.answer || ''),
+    answer: sanitizeLine(normalizeAssistantField(parsed.answer || '')),
     cards: {
-      headline: sanitizeLine(cards.headline || ''),
-      key_drivers: Array.isArray(cards.key_drivers) ? cards.key_drivers.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 5) : [],
-      impacts: Array.isArray(cards.impacts) ? cards.impacts.map((v) => sanitizeLine(v)).filter(Boolean).slice(0, 5) : [],
+      headline: sanitizeLine(normalizeAssistantField(cards.headline || '')),
+      key_drivers: Array.isArray(cards.key_drivers) ? cards.key_drivers.map((v) => sanitizeLine(normalizeAssistantField(v))).filter(Boolean).slice(0, 5) : [],
+      impacts: Array.isArray(cards.impacts) ? cards.impacts.map((v) => sanitizeLine(normalizeAssistantField(v))).filter(Boolean).slice(0, 5) : [],
       actions: Array.isArray(cards.actions)
         ? cards.actions.map((a) => ({
             priority: ['P0', 'P1', 'P2'].includes(String(a?.priority || '').toUpperCase())
               ? String(a.priority).toUpperCase()
               : 'P1',
-            title: sanitizeLine(a?.title || ''),
-            why: sanitizeLine(a?.why || ''),
+            title: sanitizeLine(normalizeAssistantField(a?.title || '')),
+            why: sanitizeLine(normalizeAssistantField(a?.why || '')),
             owner_suggest: sanitizeLine(a?.owner_suggest || '待定'),
             timeframe: sanitizeLine(a?.timeframe || '7d')
           })).filter((a) => a.title).slice(0, 3)
@@ -688,13 +893,19 @@ async function handleAiChatV2(req, res) {
     ? String(body.mode || 'auto')
     : 'auto';
   const topK = clamp(body?.top_k, 3, 20) || 12;
-  const requestedDays = clamp(body?.range_days, 1, 180) || (mode === 'news_summary' ? 7 : 3);
+  const inferredDays = inferRangeDaysFromQuery(query);
+  const requestedDays = inferredDays || clamp(body?.range_days, 1, 180) || (mode === 'news_summary' ? 7 : 3);
   const timezone = sanitizeLine(body?.timezone || '+08:00') || '+08:00';
 
   const intent = await detectIntentByLlm(query, mode);
   const expansion = await buildQueryExpansion(query, intent);
   const dailyBrief = await fetchLatestDailyBrief().catch(() => null);
-  const candidates = await fetchNewsCandidatesV2({ days: requestedDays, limit: 260 }).catch(() => []);
+  const newsCandidates = await fetchNewsCandidatesV2({ days: requestedDays, limit: 260 }).catch(() => []);
+  const useCompetitorUpdates = isCompetitorUpdateQuery(query);
+  const competitorCandidates = useCompetitorUpdates
+    ? await fetchCompetitorUpdateCandidatesV2({ days: requestedDays, limit: 180 }).catch(() => [])
+    : [];
+  const candidates = [...newsCandidates, ...competitorCandidates];
   const ranked = rankNewsHybrid({ query, candidates, expansion });
   const sources = buildContextFromSources(ranked.slice(0, topK), topK);
 
@@ -702,8 +913,10 @@ async function handleAiChatV2(req, res) {
     total_candidates: candidates.length,
     returned: sources.length,
     strategy: candidates.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'embedding'))
-      ? 'hybrid(keyword+semantic+time_decay+dedupe)'
-      : 'hybrid(keyword+query_expansion+time_decay+dedupe)'
+      ? 'hybrid(keyword+semantic+time_decay+dedupe+competitor_updates)'
+      : 'hybrid(keyword+query_expansion+time_decay+dedupe+competitor_updates)',
+    news_raw_candidates: newsCandidates.length,
+    competitor_update_candidates: competitorCandidates.length
   };
   const timeRangeText = `${requestedDays}d (${timezone})`;
 
@@ -775,6 +988,7 @@ async function handleAiChatV2(req, res) {
       title: s.title,
       url: s.url,
       domain: s.domain,
+      source_type: s.source_type || 'news_raw',
       published_at: s.published_at,
       score: s.score
     })),
@@ -1080,6 +1294,15 @@ async function handleNewsRaw(req, res) {
   const recentDays = Number.parseInt(String(requestUrl.searchParams.get('recent_days') || ''), 10);
   const dateFrom = String(requestUrl.searchParams.get('date_from') || '').trim();
   const dateTo = String(requestUrl.searchParams.get('date_to') || '').trim();
+  const ids = String(requestUrl.searchParams.get('ids') || '')
+    .split(',')
+    .map((value) => String(value || '').trim())
+    .filter((value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value))
+    .slice(0, 200);
+  const platforms = String(requestUrl.searchParams.get('platform') || '')
+    .split(',')
+    .map((value) => sanitizeLine(value))
+    .filter(Boolean);
   const impactGt = Number.parseFloat(String(requestUrl.searchParams.get('impact_gt') || ''));
   const impactLte = Number.parseFloat(String(requestUrl.searchParams.get('impact_lte') || ''));
 
@@ -1090,13 +1313,15 @@ async function handleNewsRaw(req, res) {
   upstreamUrl.searchParams.set('select', select);
   const andFilters = [];
   if (dateFrom) {
-    andFilters.push(`publish_time.gte.${dateFrom}T00:00:00+08:00`);
+    const start = utc8DayBoundaryIso(dateFrom, false);
+    if (start) andFilters.push(`created_at.gte.${start}`);
   } else if (Number.isFinite(recentDays) && recentDays > 0) {
     const start = new Date(Date.now() - recentDays * 24 * 60 * 60 * 1000).toISOString();
-    andFilters.push(`publish_time.gte.${start}`);
+    andFilters.push(`created_at.gte.${start}`);
   }
   if (dateTo) {
-    andFilters.push(`publish_time.lte.${dateTo}T23:59:59+08:00`);
+    const end = utc8DayBoundaryIso(dateTo, true);
+    if (end) andFilters.push(`created_at.lte.${end}`);
   }
   if (Number.isFinite(impactGt)) {
     andFilters.push(`impact_score.gt.${impactGt}`);
@@ -1107,7 +1332,17 @@ async function handleNewsRaw(req, res) {
   if (andFilters.length > 0) {
     upstreamUrl.searchParams.set('and', `(${andFilters.join(',')})`);
   }
-  upstreamUrl.searchParams.set('order', 'publish_time.desc.nullslast,created_at.desc');
+  if (ids.length === 1) {
+    upstreamUrl.searchParams.set('id', `eq.${ids[0]}`);
+  } else if (ids.length > 1) {
+    upstreamUrl.searchParams.set('id', `in.(${ids.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(',')})`);
+  }
+  if (platforms.length === 1) {
+    upstreamUrl.searchParams.set('platform', `eq.${platforms[0]}`);
+  } else if (platforms.length > 1) {
+    upstreamUrl.searchParams.set('platform', `in.(${platforms.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(',')})`);
+  }
+  upstreamUrl.searchParams.set('order', 'created_at.desc,publish_time.desc.nullslast');
   upstreamUrl.searchParams.set('limit', String(limit));
   upstreamUrl.searchParams.set('offset', String(offset));
 
@@ -1189,6 +1424,96 @@ async function handleDailyBrief(req, res, requestUrl) {
   res.end(text);
 }
 
+async function handleCompetitorUpdates(req, res) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    sendJson(res, 500, { error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on server.' });
+    return;
+  }
+
+  const requestUrl = new URL(req.url || '/api/competitor_updates', `http://${req.headers.host || 'localhost'}`);
+  const rawLimit = Number.parseInt(String(requestUrl.searchParams.get('limit') || ''), 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200;
+  const rawOffset = Number.parseInt(String(requestUrl.searchParams.get('offset') || ''), 10);
+  const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+  const includeTotal = String(requestUrl.searchParams.get('include_total') || '') === '1';
+  const ids = String(requestUrl.searchParams.get('ids') || '')
+    .split(',')
+    .map((value) => String(value || '').trim())
+    .filter((value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value))
+    .slice(0, 200);
+  const platform = sanitizeLine(requestUrl.searchParams.get('platform') || '');
+  const sourceType = sanitizeLine(requestUrl.searchParams.get('source_type') || '');
+  const eventType = sanitizeLine(requestUrl.searchParams.get('event_type') || '');
+  const impact = sanitizeLine(requestUrl.searchParams.get('competitive_impact') || '');
+  const keyword = sanitizeLine(requestUrl.searchParams.get('keyword') || '');
+  const dateFrom = sanitizeLine(requestUrl.searchParams.get('date_from') || '');
+  const dateTo = sanitizeLine(requestUrl.searchParams.get('date_to') || '');
+
+  const upstreamUrl = new URL(`${SUPABASE_URL}/rest/v1/competitor_updates`);
+  upstreamUrl.searchParams.set(
+    'select',
+    'id,platform,source_type,source_name,source_url,detail_url,title,summary,content,raw_payload,published_at,effective_at,detected_at,last_checked_at,content_changed_at,event_type,update_label,product_area,status,competitive_impact,impact_reason,gap_assumption,recommended_action,importance_score,created_at,updated_at'
+  );
+  const filters = [];
+  if (ids.length === 1) filters.push(`id.eq.${ids[0]}`);
+  else if (ids.length > 1) filters.push(`id.in.(${ids.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(',')})`);
+  if (platform) filters.push(`platform.eq.${platform}`);
+  if (sourceType) filters.push(`source_type.eq.${sourceType}`);
+  if (eventType) filters.push(`event_type.eq.${eventType}`);
+  if (impact) filters.push(`competitive_impact.eq.${impact}`);
+  if (dateFrom) filters.push(`or(published_at.gte.${dateFrom}T00:00:00+08:00,effective_at.gte.${dateFrom}T00:00:00+08:00)`);
+  if (dateTo) filters.push(`or(published_at.lte.${dateTo}T23:59:59+08:00,effective_at.lte.${dateTo}T23:59:59+08:00)`);
+  if (filters.length > 0) upstreamUrl.searchParams.set('and', `(${filters.join(',')})`);
+  if (keyword) {
+    const escaped = keyword.replace(/[%*,()]/g, ' ');
+    upstreamUrl.searchParams.set('or', `(title.ilike.*${escaped}*,summary.ilike.*${escaped}*,product_area.ilike.*${escaped}*)`);
+  }
+  upstreamUrl.searchParams.set('order', 'published_at.desc.nullslast,effective_at.desc.nullslast,detected_at.desc');
+  upstreamUrl.searchParams.set('limit', String(limit));
+  upstreamUrl.searchParams.set('offset', String(offset));
+
+  const headers = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+  };
+  if (includeTotal) headers.Prefer = 'count=exact';
+
+  const upstream = await fetch(upstreamUrl.toString(), { headers });
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    sendJson(res, upstream.status || 502, { error: text || 'Supabase request failed' });
+    return;
+  }
+
+  if (!includeTotal) {
+    const rows = safeJsonParse(text, []);
+    if (Array.isArray(rows)) {
+      sendJson(res, 200, rows.map(normalizeCompetitorUpdateDateFields).map(normalizeCompetitorUpdateTextFields));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(text);
+    }
+    return;
+  }
+
+  let rows = [];
+  try {
+    const parsed = JSON.parse(text);
+    rows = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    rows = [];
+  }
+  let total = rows.length;
+  rows = rows.map(normalizeCompetitorUpdateDateFields).map(normalizeCompetitorUpdateTextFields);
+  const contentRange = upstream.headers.get('content-range') || '';
+  const slash = contentRange.lastIndexOf('/');
+  if (slash >= 0) {
+    const rawTotalNum = Number.parseInt(contentRange.slice(slash + 1), 10);
+    if (Number.isFinite(rawTotalNum)) total = rawTotalNum;
+  }
+  sendJson(res, 200, { total, rows });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const { method = 'GET', url = '/' } = req;
@@ -1228,6 +1553,11 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && pathname === '/api/daily_brief') {
       await handleDailyBrief(req, res, requestUrl);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/competitor_updates') {
+      await handleCompetitorUpdates(req, res);
       return;
     }
 

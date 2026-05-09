@@ -5,6 +5,7 @@ import NewsDetailDrawer from './components/ui/NewsDetailDrawer';
 import EvidenceDrawer from './components/ui/EvidenceDrawer';
 import DashboardPage from './pages/DashboardPage';
 import NewsLibraryPage from './pages/NewsLibraryPage';
+import CompetitorUpdatesPage from './pages/CompetitorUpdatesPage';
 import { api } from './services/api';
 import { storage } from './services/storage';
 import { track, trackPageView, trackSectionView } from './lib/analytics';
@@ -43,6 +44,7 @@ function writeCoreSnapshot(payload) {
 }
 
 function App() {
+  const [theme, setTheme] = useState(() => storage.getTheme());
   const [selectedBriefDate, setSelectedBriefDate] = useState(() => {
     return utc8DateKey(0);
   });
@@ -87,6 +89,11 @@ function App() {
     offsetY: 0
   });
   const observedSectionsRef = useRef(new Set());
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    storage.setTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     let mounted = true;
@@ -256,7 +263,10 @@ function App() {
 
     Promise.all([api.getNewsById(selectedNewsId), api.getRelatedNews(selectedNewsId)]).then(([news, related]) => {
       if (!mounted) return;
-      setSelectedNews(news);
+      setSelectedNews((prev) => {
+        if (news) return news;
+        return prev?.id === selectedNewsId ? prev : null;
+      });
       setRelatedNews(related);
       if (news) {
         const nextRead = storage.markRead(news.id);
@@ -295,7 +305,7 @@ function App() {
   useEffect(() => {
     if (fabPos.x !== null && fabPos.y !== null) return;
     const initialX = Math.max(12, window.innerWidth - 180);
-    const initialY = Math.max(110, Math.round(window.innerHeight * 0.55));
+    const initialY = Math.max(140, Math.round(window.innerHeight * 0.76));
     setFabPos({ x: initialX, y: initialY });
   }, [fabPos.x, fabPos.y]);
 
@@ -341,8 +351,22 @@ function App() {
   const evidenceNews = useMemo(() => {
     const unique = [...new Set(evidenceData.newsIds)];
     const mapped = unique.map((id) => newsMap.get(id)).filter(Boolean);
-    if (mapped.length > 0) return mapped;
-    if (Array.isArray(evidenceData.items) && evidenceData.items.length > 0) return evidenceData.items;
+    const seeded = Array.isArray(evidenceData.items) ? evidenceData.items : [];
+    if (mapped.length > 0 && seeded.length === 0) return mapped;
+    if (seeded.length > 0) {
+      const merged = new Map();
+      seeded.forEach((item) => {
+        const id = String(item?.id || '');
+        merged.set(id || `seed:${merged.size}`, item);
+      });
+      mapped.forEach((item) => {
+        const id = String(item?.id || '');
+        if (!id) return;
+        const fallback = merged.get(id) || {};
+        merged.set(id, { ...fallback, ...item });
+      });
+      return Array.from(merged.values());
+    }
     return [];
   }, [evidenceData.newsIds, evidenceData.items, newsMap]);
 
@@ -358,7 +382,7 @@ function App() {
   const onNavigate = (key) => {
     setActiveNav(key);
     setTimeout(() => {
-      if (key === 'library') {
+      if (key === 'library' || key === 'competitor') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
@@ -370,14 +394,8 @@ function App() {
     }, 10);
   };
 
-  const onToggleAIPanel = () => {
-    setAiPanelOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        track('ai_panel_open', { entry: 'button' });
-      }
-      return next;
-    });
+  const onToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
   const inferEvidenceSource = (evidence) => {
@@ -408,6 +426,15 @@ function App() {
     setEvidenceOpen(false);
   };
 
+  const onOpenNewsFromEvidence = (newsOrId) => {
+    if (newsOrId && typeof newsOrId === 'object') {
+      setSelectedNews(newsOrId);
+      setSelectedNewsId(newsOrId.id ?? null);
+    } else {
+      setSelectedNewsId(newsOrId);
+    }
+  };
+
   const onToggleFavorite = (id) => {
     setFavorites(storage.toggleFavorite(id));
   };
@@ -422,12 +449,12 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="app-page">
         <div className="mx-auto max-w-[1400px] px-4 py-20 lg:px-8">
-          <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-800" />
+          <div className="h-10 w-64 animate-pulse rounded-lg app-card-soft" />
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, idx) => (
-              <div key={idx} className="h-40 animate-pulse rounded-2xl border border-slate-700 bg-slate-900/60" />
+              <div key={idx} className="h-40 animate-pulse rounded-2xl app-card" />
             ))}
           </div>
         </div>
@@ -437,13 +464,13 @@ function App() {
 
   if (!insight) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="app-page">
         <div className="mx-auto max-w-xl px-4 py-32 text-center lg:px-8">
           <p className="text-sm text-rose-300">{error || '系统加载异常'}</p>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="mt-4 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-300/40"
+            className="mt-4 rounded-lg app-button-secondary px-3 py-1.5 text-xs"
           >
             刷新重试
           </button>
@@ -453,10 +480,15 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_20%,rgba(56,189,248,0.2),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.14),transparent_35%),linear-gradient(180deg,#030712_0%,#020617_65%,#000000_100%)]" />
+    <div className="app-page">
+      <div className="app-ambient pointer-events-none fixed inset-0 -z-10" />
 
-      <TopNav activeKey={activeNav} onNavigate={onNavigate} aiPanelOpen={aiPanelOpen} onToggleAI={onToggleAIPanel} />
+      <TopNav
+        activeKey={activeNav}
+        onNavigate={onNavigate}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
 
       {error ? (
         <div className="mx-auto mt-4 max-w-[1400px] px-4 lg:px-8">
@@ -476,6 +508,8 @@ function App() {
             onOpenEvidence={onOpenEvidence}
             indexMap={indexMap}
           />
+        ) : activeNav === 'competitor' ? (
+          <CompetitorUpdatesPage />
         ) : (
           <DashboardPage
             insight={insight}
@@ -529,9 +563,9 @@ function App() {
             left: fabPos.x ?? undefined,
             top: fabPos.y ?? undefined
           }}
-          className="fixed z-30 cursor-move rounded-full border border-cyan-300/40 bg-slate-900/90 px-4 py-2 text-xs text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.22)] hover:bg-slate-800"
+          className="app-fab fixed z-30 cursor-move rounded-full px-4 py-2 text-xs"
         >
-          🧠 展开 AI 助手
+          🧠 AI 助手
         </button>
       ) : null}
 
@@ -551,7 +585,7 @@ function App() {
         title={evidenceData.title}
         newsList={evidenceNews}
         onClose={() => setEvidenceOpen(false)}
-        onOpenNews={setSelectedNewsId}
+        onOpenNews={onOpenNewsFromEvidence}
         onOpenLibraryByIds={onOpenLibraryByIds}
       />
 

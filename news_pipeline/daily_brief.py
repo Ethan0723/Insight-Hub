@@ -13,6 +13,8 @@ from .supabase_client import fetch_latest_daily_brief_by_date, fetch_news_raw_fo
 UTC8 = timezone(timedelta(hours=8))
 PROMPT_VERSION = os.getenv("DAILY_BRIEF_PROMPT_VERSION", "v1")
 DAILY_BRIEF_TZ = os.getenv("DAILY_BRIEF_TZ", "Asia/Shanghai")
+TARGET_BRIEF_DATE = os.getenv("DAILY_BRIEF_TARGET_DATE", "").strip()
+FORCE_OVERWRITE = os.getenv("DAILY_BRIEF_FORCE_OVERWRITE", "false").strip().lower() in {"1", "true", "yes"}
 MAX_NEWS = int(os.getenv("DAILY_BRIEF_MAX_NEWS", "50"))
 FETCH_LIMIT = int(os.getenv("DAILY_BRIEF_FETCH_LIMIT", "120"))
 LLM_MAX_TOKENS = int(os.getenv("DAILY_BRIEF_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "1500")))
@@ -22,6 +24,7 @@ QUALITY_GUARD_DELTA = int(os.getenv("DAILY_BRIEF_QUALITY_GUARD_DELTA", "5"))
 HIGH_IMPACT_THRESHOLD = int(os.getenv("DAILY_BRIEF_HIGH_IMPACT_THRESHOLD", "60"))  # >=60
 GEN_RETRY_MAX = int(os.getenv("DAILY_BRIEF_RETRY_MAX", "3"))
 GEN_RETRY_TRIGGER_USED = int(os.getenv("DAILY_BRIEF_RETRY_TRIGGER_USED", "3"))
+GEN_RETRY_TOKEN_STEP = int(os.getenv("DAILY_BRIEF_RETRY_TOKEN_STEP", "1000"))
 
 RISK_WEIGHT = {"高": 3, "中": 2, "低": 1}
 _DISALLOWED_TERMS = ("样本少", "无关业务", "需观察", "新闻不足", "单点风险")
@@ -34,12 +37,103 @@ _BLOCKED_ONE_LINER_PREFIXES = (
     "外部冲击尚不集中",
     "当前高影响事件尚未收敛",
 )
+_CORE_BUSINESS_KEYWORDS = (
+    "shopify",
+    "shopline",
+    "shoplazza",
+    "amazon",
+    "aws",
+    "tiktok shop",
+    "temu",
+    "seller",
+    "merchant",
+    "marketplace",
+    "checkout",
+    "payment",
+    "fraud",
+    "chargeback",
+    "shipping",
+    "logistics",
+    "fulfillment",
+    "ads",
+    "advertising",
+    "saas",
+    "ai agent",
+    "agent",
+    "cross-border",
+    "ecommerce",
+    "platform",
+    "卖家",
+    "商家",
+    "平台",
+    "支付",
+    "物流",
+    "履约",
+    "风控",
+    "投放",
+    "佣金",
+    "订阅",
+    "广告",
+    "电商",
+)
+_NOISE_KEYWORDS = (
+    "sports",
+    "sport",
+    "nhl",
+    "mlb",
+    "football",
+    "hockey",
+    "obituary",
+    "tribute",
+    "election",
+    "riding",
+    "crime",
+    "shooting",
+    "insurance",
+    "方向盘",
+    "讣告",
+    "体育",
+    "政治",
+    "保险",
+    "校园枪击",
+    "非相关",
+    "无关联",
+)
+_TOPIC_RULES = [
+    ("amazon", "Amazon"),
+    ("aws", "AWS"),
+    ("shopify", "Shopify"),
+    ("shopline", "Shopline"),
+    ("shoplazza", "Shoplazza"),
+    ("tiktok shop", "TikTok Shop"),
+    ("temu", "Temu"),
+    ("seller", "卖家生态"),
+    ("merchant", "商家需求"),
+    ("marketplace", "平台生态"),
+    ("payment", "支付"),
+    ("checkout", "支付转化"),
+    ("fraud", "支付风控"),
+    ("shipping", "履约"),
+    ("logistics", "履约"),
+    ("fulfillment", "履约"),
+    ("ads", "获客投放"),
+    ("advertising", "获客投放"),
+    ("ai agent", "AI代理"),
+    ("agent", "AI代理"),
+    ("tariff", "关税"),
+    ("tax", "税费"),
+    ("cross-border", "跨境需求"),
+    ("ecommerce", "电商需求"),
+]
 
 
-def _utc8_window(now_utc: datetime | None = None) -> tuple[str, datetime, datetime]:
+def _utc8_window(now_utc: datetime | None = None, target_date: str | None = None) -> tuple[str, datetime, datetime]:
     now_utc = now_utc or datetime.now(timezone.utc)
-    now_local = now_utc.astimezone(UTC8)
-    day_local = now_local.date()
+    if target_date:
+        day_local = datetime.fromisoformat(f"{target_date}T00:00:00+08:00").date()
+    else:
+        now_local = now_utc.astimezone(UTC8)
+        day_local = now_local.date()
     start_local = datetime.combine(day_local, datetime.min.time(), tzinfo=UTC8)
     end_local = start_local + timedelta(days=1)
     return day_local.isoformat(), start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
@@ -62,6 +156,15 @@ def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def _normalize_url_for_dedupe(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"^https?://", "", text)
+    text = text.split("?", 1)[0].rstrip("/")
+    return text
+
+
 def _truncate_for_prompt(value: Any, limit: int) -> str:
     text = _normalize_text(value)
     if len(text) <= limit:
@@ -70,27 +173,25 @@ def _truncate_for_prompt(value: Any, limit: int) -> str:
 
 
 def _topic_hint(input_news: list[dict[str, Any]]) -> str:
+    ranked = sorted(
+        input_news or [],
+        key=lambda item: (
+            int(item.get("business_score") or 0),
+            int(item.get("impact_score") or 0),
+            RISK_WEIGHT.get(str(item.get("risk_level") or "中"), 2),
+        ),
+        reverse=True,
+    )[:5]
     text = " ".join(
-        f"{str(item.get('title') or '')} {str(item.get('summary') or '')}".lower()
-        for item in (input_news or [])[:8]
+        f"{str(item.get('title') or '')} {str(item.get('summary') or '')} {' '.join(item.get('tags') or [])}".lower()
+        for item in ranked
     )
-    topic_rules = [
-        ("tariff", "关税"),
-        ("tax", "税费"),
-        ("fraud", "欺诈"),
-        ("return", "退货"),
-        ("payment", "支付"),
-        ("checkout", "支付转化"),
-        ("logistics", "履约"),
-        ("shipping", "履约"),
-        ("ai agent", "AI代理"),
-        ("agent", "AI代理"),
-        ("ecommerce", "电商需求"),
-        ("import", "跨境进口"),
-    ]
-    topics = [zh for en, zh in topic_rules if en in text]
+    topics = [zh for en, zh in _TOPIC_RULES if en in text]
     if not topics:
-        return "外部需求与支付链路"
+        top_platform = next((str(item.get("platform") or "").strip() for item in ranked if str(item.get("platform") or "").strip() not in {"", "Global"}), "")
+        if top_platform:
+            return top_platform
+        return "平台生态与经营链路"
     dedup: list[str] = []
     for t in topics:
         if t not in dedup:
@@ -133,6 +234,50 @@ def _norm_for_similarity(text: str) -> str:
     lowered = re.sub(r"https?://\S+", " ", lowered)
     lowered = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
     return lowered.strip()
+
+
+def _is_duplicate_candidate(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    url_a = _normalize_url_for_dedupe(a.get("url"))
+    url_b = _normalize_url_for_dedupe(b.get("url"))
+    if url_a and url_b and url_a == url_b:
+        return True
+
+    title_a = _norm_for_similarity(str(a.get("title") or ""))
+    title_b = _norm_for_similarity(str(b.get("title") or ""))
+    if not title_a or not title_b:
+        return False
+
+    title_ratio = SequenceMatcher(None, title_a, title_b).ratio()
+    summary_a = _norm_for_similarity(f"{a.get('title', '')} {a.get('summary', '')}")
+    summary_b = _norm_for_similarity(f"{b.get('title', '')} {b.get('summary', '')}")
+    summary_ratio = SequenceMatcher(None, summary_a, summary_b).ratio() if summary_a and summary_b else 0.0
+    same_platform = (
+        str(a.get("platform") or "Global") == str(b.get("platform") or "Global")
+        or "Global" in {str(a.get("platform") or "Global"), str(b.get("platform") or "Global")}
+    )
+    same_region = (
+        str(a.get("region") or "Global") == str(b.get("region") or "Global")
+        or "Global" in {str(a.get("region") or "Global"), str(b.get("region") or "Global")}
+    )
+    return same_platform and same_region and (title_ratio >= 0.78 or summary_ratio >= 0.72)
+
+
+def _dedupe_input_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    for item in items:
+        hit_index = next((idx for idx, existing in enumerate(deduped) if _is_duplicate_candidate(existing, item)), -1)
+        if hit_index < 0:
+            deduped.append(item)
+            continue
+
+        existing = deduped[hit_index]
+        existing_score = int(existing.get("impact_score") or 0)
+        current_score = int(item.get("impact_score") or 0)
+        existing_created = str(existing.get("publish_time") or existing.get("created_at") or "")
+        current_created = str(item.get("publish_time") or item.get("created_at") or "")
+        if current_score > existing_score or (current_score == existing_score and current_created >= existing_created):
+            deduped[hit_index] = item
+    return deduped
 
 
 def _headline_too_close_to_news(headline: str, input_news: list[dict[str, Any]]) -> bool:
@@ -294,6 +439,78 @@ def _force_topic_rewrite(brief_payload: dict[str, Any], input_news: list[dict[st
     return rewritten
 
 
+def _dominant_platform(input_news: list[dict[str, Any]]) -> str:
+    counts: dict[str, int] = {}
+    for item in input_news:
+        platform = str(item.get("platform") or "").strip()
+        if not platform or platform == "Global":
+            continue
+        counts[platform] = counts.get(platform, 0) + 1
+    if not counts:
+        return ""
+    return sorted(counts.items(), key=lambda kv: (kv[1], kv[0]), reverse=True)[0][0]
+
+
+def _fallback_impacts(topic: str, platform: str, input_news: list[dict[str, Any]]) -> dict[str, str]:
+    lead = input_news[0] if input_news else {}
+    summary = _normalize_text(lead.get("summary"))
+    anchor = platform or topic or "平台生态"
+    if platform == "Amazon" or "Amazon" in topic or "AWS" in topic:
+        return {
+            "merchant_demand": f"{anchor}相关高影响新闻显示平台资源继续向AI基础设施倾斜，商家会更关注独立站与多渠道布局，需验证迁移咨询线索与新客询盘率。",
+            "acquisition": "可围绕“降低平台单点依赖”更新获客话术，优先测试亚马逊卖家迁移包和多渠道运营方案的转化效率。",
+            "conversion": "站内转化短期不会立刻改善，但若把平台依赖风险与自有渠道收益讲清楚，可提升高意向客户签约率。",
+            "payments_risk": "短期没有新增支付事故，但若商家推进多渠道布局，需提前补齐收单、对账和风控能力以承接迁移需求。",
+            "fulfillment": "平台与零售基础设施升级会抬高商家对履约时效和服务确定性的要求，需同步检查物流集成与异常订单处理体验。",
+            "competition": f"{anchor}动作会强化头部平台基础设施优势，也会倒逼独立站SaaS在卖家迁移、运营自动化和生态整合上给出更强方案。",
+        }
+    if platform == "Shopify" or "Shopify" in topic:
+        return {
+            "merchant_demand": "Shopify相关信号说明平台仍在强化产品与AI能力，商家对建站效率和运营自动化预期提升，需验证高阶套餐和AI工具需求。",
+            "acquisition": "获客侧应突出行业模板、迁移效率和本地化服务，而不是只比基础建站功能。",
+            "conversion": "转化重点在于把AI与生态协同能力讲清楚，缩短客户从试用到付费的决策链路。",
+            "payments_risk": "若商家更依赖平台一体化能力，需补足支付链路稳定性与风控解释，降低对手在结算体验上的优势。",
+            "fulfillment": "履约集成仍是成交关键，需优先验证仓配、物流状态同步与售后流程体验。",
+            "competition": "Shopify强化能力后，竞争会更多转向生态整合、AI效率和商家经营闭环，而不只是建站模板。",
+        }
+    base = summary or f"{anchor}相关信号正在影响商家经营与平台生态。"
+    return {
+        "merchant_demand": f"{base} 需先验证新客询盘率、试用激活率和高价值客户需求是否同步升温。",
+        "acquisition": f"围绕{anchor}更新行业话术与落地页，优先测试最接近当天主题的获客切口。",
+        "conversion": f"把{anchor}带来的经营变化翻译成产品价值点，优先观察试用到付费转化和销售周期变化。",
+        "payments_risk": f"{anchor}暂未直接触发支付事件，但需跟踪支付成功率、拒付率和对账复杂度是否上升。",
+        "fulfillment": f"{anchor}对履约的影响仍在传导，建议复核物流集成稳定性、时效承诺与异常订单处理能力。",
+        "competition": f"{anchor}相关动作会影响平台竞争预期，需尽快明确我们的差异化卖点与对客打法。",
+    }
+
+
+def _fallback_actions(topic: str, platform: str) -> list[dict[str, str]]:
+    anchor = platform or topic or "当天主题"
+    return [
+        {
+            "priority": "P0",
+            "owner": "战略",
+            "timeframe": "24-72h",
+            "action": f"围绕{anchor}更新管理层判断和对客口径，确认这波信号对商家迁移、续费和新签的直接影响。",
+            "success_metric": "核心客户沟通覆盖率与重点机会名单更新完成率",
+        },
+        {
+            "priority": "P1",
+            "owner": "产品",
+            "timeframe": "1-2w",
+            "action": f"梳理与{anchor}最相关的产品能力短板，优先补齐支付、履约或迁移链路中的关键缺口。",
+            "success_metric": "关键能力缺口清单关闭率与试点客户反馈",
+        },
+        {
+            "priority": "P2",
+            "owner": "商业化",
+            "timeframe": "本月",
+            "action": f"围绕{anchor}输出行业案例、迁移方案或价值证明材料，并分层触达高意向客户。",
+            "success_metric": "高意向客户转化率与商机推进速度",
+        },
+    ]
+
+
 def _extract_existing_quality(existing_row: dict[str, Any]) -> int:
     stats = _as_dict(existing_row.get("stats"))
     q = stats.get("quality_score")
@@ -301,6 +518,27 @@ def _extract_existing_quality(existing_row: dict[str, Any]) -> int:
         return int(q)
     except Exception:
         return 0
+
+
+def _extract_existing_max_impact(existing_row: dict[str, Any]) -> int:
+    stats = _as_dict(existing_row.get("stats"))
+    value = stats.get("max_impact_score")
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _is_generic_existing_row(existing_row: dict[str, Any]) -> bool:
+    headline = _normalize_text(existing_row.get("headline"))
+    one_liner = _normalize_text(existing_row.get("one_liner"))
+    if headline.startswith(_BLOCKED_HEADLINE_PREFIXES) or one_liner.startswith(_BLOCKED_ONE_LINER_PREFIXES):
+        return True
+    if headline.endswith("波动加剧，先做可逆验证与预案"):
+        return True
+    if "先用低成本试点验证需求、支付与履约指标" in one_liner:
+        return True
+    return False
 
 
 def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: str) -> list[str]:
@@ -336,6 +574,35 @@ def _detect_tags(row: dict[str, Any], summary_obj: dict[str, Any], merged_text: 
     return unique[:8]
 
 
+def _business_relevance_score(item: dict[str, Any]) -> int:
+    text = (
+        f"{item.get('title', '')} {item.get('summary', '')} "
+        f"{' '.join(item.get('tags') or [])} {item.get('platform', '')} {item.get('region', '')}"
+    ).lower()
+    score = sum(1 for key in _CORE_BUSINESS_KEYWORDS if key in text)
+    if str(item.get("platform") or "") not in {"", "Global"}:
+        score += 3
+    impact = int(item.get("impact_score") or 0)
+    if impact >= HIGH_IMPACT_THRESHOLD:
+        score += 2
+    if str(item.get("risk_level") or "") == "高":
+        score += 1
+    return score
+
+
+def _is_irrelevant_noise(item: dict[str, Any]) -> bool:
+    text = (
+        f"{item.get('title', '')} {item.get('summary', '')} {' '.join(item.get('tags') or [])}"
+    ).lower()
+    business_score = int(item.get("business_score") or 0)
+    impact = int(item.get("impact_score") or 0)
+    if any(key in text for key in _NOISE_KEYWORDS):
+        return business_score < 5 and impact < HIGH_IMPACT_THRESHOLD
+    if "无实质影响" in text or "与跨境电商saas平台无关" in text or "无需采取行动" in text:
+        return business_score < 6 and impact < HIGH_IMPACT_THRESHOLD
+    return impact <= 0 and business_score < 4
+
+
 def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
@@ -362,6 +629,7 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             impact_score = 0
 
         created_at_raw = str(row.get("created_at") or "")
+        publish_time_raw = str(row.get("publish_time") or "")
         candidates.append(
             {
                 "id": str(row.get("id") or "").strip(),
@@ -379,26 +647,9 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 or "Global",
                 "tags": tags,
                 "created_at": created_at_raw,
+                "publish_time": publish_time_raw,
             }
         )
-
-    def relevance_score(item: dict[str, Any]) -> int:
-        text = f"{item.get('title', '')} {item.get('summary', '')} {' '.join(item.get('tags') or [])}".lower()
-        keys = [
-            "merchant",
-            "saas",
-            "checkout",
-            "payment",
-            "fulfillment",
-            "acquisition",
-            "商家",
-            "支付",
-            "履约",
-            "获客",
-            "转化",
-            "竞争",
-        ]
-        return sum(1 for key in keys if key in text)
 
     def parse_created(ts: str) -> float:
         try:
@@ -406,13 +657,21 @@ def _build_input_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except Exception:
             return 0
 
+    deduped = _dedupe_input_news(candidates)
+    for item in deduped:
+        item["business_score"] = _business_relevance_score(item)
+
+    filtered = [item for item in deduped if not _is_irrelevant_noise(item)]
+    if not filtered:
+        filtered = deduped
+
     sorted_rows = sorted(
-        candidates,
+        filtered,
         key=lambda item: (
-            RISK_WEIGHT.get(str(item.get("risk_level")), 2),
+            int(item.get("business_score") or 0),
             int(item.get("impact_score") or 0),
-            relevance_score(item),
-            parse_created(str(item.get("created_at") or "")),
+            RISK_WEIGHT.get(str(item.get("risk_level")), 2),
+            parse_created(str(item.get("publish_time") or item.get("created_at") or "")),
         ),
         reverse=True,
     )
@@ -440,6 +699,10 @@ def _build_prompt(*, input_news: list[dict[str, Any]], style: str, low_sample: b
 6) 只输出严格 JSON，不要 Markdown，不要解释。
 7) 不允许使用“...”或“…”省略信息，必须输出完整句子。
 8) headline 禁止直接复用输入新闻标题、引号原句或人物原话（如 CEO 原话）；必须抽象成“公司动作导向结论”。
+9) 若高影响新闻里出现明确平台/公司主体（如 Amazon、AWS、Shopify、TikTok Shop、Temu），headline 或 one_liner 至少一处要点名该主体，不能只写“宏观信号/外部变量/AI代理”这类泛词。
+10) 若高影响新闻主要是平台动作、卖家生态、支付/履约变化，优先围绕这些业务链路写结论，不要被泛消费、线下品牌活动或无关新闻带偏。
+11) 禁止在 actions 和 success_metric 中编造具体数字目标（如线索数、转化率、增长率、模板数量）；只有输入新闻明确给出的事实数字才可出现在结论或驱动解释中。
+12) 行动项应使用“验证、评估、形成清单、完成演示、沉淀话术”等可解释口径，避免承诺未经验证的商业结果。
 
 【低样本/低相关日处理规则（非常重要）】
 - 即使可用新闻很少或相关性低，也必须输出“噪声日结论”而不是“样本少”。
@@ -616,6 +879,7 @@ def _normalize_brief(
     citations = _clean_citations(raw.get("citations"), input_news)
     high_risk = sum(1 for item in input_news if item.get("risk_level") == "高")
     high_impact = sum(1 for item in input_news if int(item.get("impact_score") or 0) >= HIGH_IMPACT_THRESHOLD)
+    max_impact_score = max([int(item.get("impact_score") or 0) for item in input_news], default=0)
 
     stats_raw = raw.get("stats") if isinstance(raw.get("stats"), dict) else {}
     stats = {
@@ -623,6 +887,7 @@ def _normalize_brief(
         "used": int(stats_raw.get("used") or len(input_news)),
         "high_risk": int(stats_raw.get("high_risk") or high_risk),
         "high_impact": int(stats_raw.get("high_impact") or high_impact),
+        "max_impact_score": int(stats_raw.get("max_impact_score") or max_impact_score),
     }
 
     return {
@@ -639,8 +904,10 @@ def _normalize_brief(
 def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: bool) -> dict[str, Any]:
     top = input_news[:3]
     topic = _topic_hint(input_news)
+    platform = _dominant_platform(input_news)
     headline = f"{topic}波动加剧，先做可逆验证与预案"
-    one_liner = f"当日信号主要集中在{topic}，先用低成本试点验证需求、支付与履约指标，再决定是否扩大投入。"
+    subject = platform or topic
+    one_liner = f"当日高影响信号主要集中在{subject}，应先把商家迁移、支付履约与对客话术准备到位，再决定是否扩大投入。"
 
     return _normalize_brief(
         {
@@ -654,6 +921,8 @@ def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: 
                 }
                 for item in top
             ],
+            "impacts": _fallback_impacts(topic, platform, input_news),
+            "actions": _fallback_actions(topic, platform),
             "citations": [item.get("id") or item.get("url") for item in top],
         },
         input_news=input_news,
@@ -664,7 +933,7 @@ def _fallback_brief(input_news: list[dict[str, Any]], scanned: int, low_sample: 
 
 def generate_daily_brief() -> dict[str, Any]:
     now_utc = datetime.now(timezone.utc)
-    brief_date, window_start, window_end = _utc8_window(now_utc)
+    brief_date, window_start, window_end = _utc8_window(now_utc, TARGET_BRIEF_DATE or None)
     raw_rows = fetch_news_raw_for_daily_brief(
         window_start_iso=window_start.isoformat(),
         window_end_iso=window_end.isoformat(),
@@ -681,12 +950,20 @@ def generate_daily_brief() -> dict[str, Any]:
         for attempt in range(1, max(1, GEN_RETRY_MAX) + 1):
             style = _style_choice(now_utc + timedelta(hours=attempt - 1))
             prompt = _build_prompt(input_news=input_news, style=style, low_sample=low_sample)
+            attempt_max_tokens = LLM_MAX_TOKENS + max(0, attempt - 1) * max(0, GEN_RETRY_TOKEN_STEP)
             llm_resp = generate_json_object(
                 prompt,
-                max_tokens=LLM_MAX_TOKENS,
+                max_tokens=attempt_max_tokens,
                 temperature=LLM_TEMPERATURE,
                 timeout=LLM_TIMEOUT,
             )
+            if llm_resp.get("finish_reason") == "length":
+                last_error = "LLM output truncated"
+                print(
+                    f"[DAILY_BRIEF][WARN] LLM output truncated | attempt={attempt} "
+                    f"max_tokens={attempt_max_tokens}"
+                )
+                continue
             if not llm_resp.get("ok"):
                 last_error = "LLM JSON parse failed"
                 continue
@@ -739,11 +1016,20 @@ def generate_daily_brief() -> dict[str, Any]:
     write_error = ""
     skipped_by_quality_guard = False
     existing_quality = 0
+    existing_max_impact = 0
     try:
         existing = fetch_latest_daily_brief_by_date(brief_date=brief_date, prompt_version=PROMPT_VERSION)
         if existing:
             existing_quality = _extract_existing_quality(existing)
-            if existing_quality >= new_quality + QUALITY_GUARD_DELTA:
+            existing_max_impact = _extract_existing_max_impact(existing)
+            new_max_impact = int(_as_dict(row.get("stats")).get("max_impact_score") or 0)
+            existing_is_generic = _is_generic_existing_row(existing)
+            should_replace = (
+                new_max_impact > existing_max_impact and new_quality >= existing_quality + QUALITY_GUARD_DELTA
+            )
+            if existing_is_generic and new_quality >= max(50, existing_quality):
+                should_replace = True
+            if not should_replace and not FORCE_OVERWRITE:
                 skipped_by_quality_guard = True
                 inserted = existing
             else:
@@ -770,6 +1056,8 @@ def generate_daily_brief() -> dict[str, Any]:
         "fallback_used": fallback_used,
         "quality_score": new_quality,
         "existing_quality": existing_quality,
+        "max_impact_score": int(_as_dict(row.get("stats")).get("max_impact_score") or 0),
+        "existing_max_impact": existing_max_impact,
         "skipped_by_quality_guard": skipped_by_quality_guard,
     }
 
@@ -785,7 +1073,9 @@ def main() -> None:
     print(f"[DAILY_BRIEF] one_liner={result['one_liner']}")
     print(f"[DAILY_BRIEF] citations={result['citations_count']} fallback={result['fallback_used']}")
     print(
-        f"[DAILY_BRIEF] quality=new:{result['quality_score']} old:{result['existing_quality']} skipped={result['skipped_by_quality_guard']}"
+        f"[DAILY_BRIEF] quality=new:{result['quality_score']} old:{result['existing_quality']} "
+        f"impact=new:{result['max_impact_score']} old:{result['existing_max_impact']} "
+        f"skipped={result['skipped_by_quality_guard']}"
     )
     if result.get("write_error"):
         print(f"[DAILY_BRIEF] write_error={result['write_error']}")
